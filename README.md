@@ -1,4 +1,15 @@
-# codi-repo
+<p align="center">
+  <img src="assets/banner.svg" alt="codi-repo" width="600">
+</p>
+
+<p align="center">
+  <a href="#installation">Installation</a> •
+  <a href="#quick-start">Quick Start</a> •
+  <a href="#commands">Commands</a> •
+  <a href="#manifest-format">Manifest</a>
+</p>
+
+---
 
 Multi-repository orchestration CLI for unified PR workflows. Manage multiple related repositories as a single workspace with synchronized branches, linked pull requests, and atomic merges.
 
