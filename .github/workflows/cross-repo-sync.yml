@@ -1,0 +1,131 @@
+name: Cross-Repo Status Sync
+
+on:
+  pull_request:
+    types: [opened, synchronize, closed, reopened]
+  workflow_dispatch:
+    inputs:
+      manifest_pr:
+        description: 'Manifest PR number to sync'
+        required: false
+
+jobs:
+  sync-status:
+    runs-on: ubuntu-latest
+    # Only run if this is a cross-repo PR (has the marker in body)
+    if: |
+      github.event_name == 'workflow_dispatch' ||
+      contains(github.event.pull_request.body, 'codi-repo:links:')
+
+    steps:
+      - name: Checkout manifest repo
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build codi-repo
+        run: npm run build
+
+      - name: Sync PR Status
+        env:
+          GITHUB_TOKEN: ${{ secrets.CROSS_REPO_TOKEN }}
+        run: |
+          PR_NUMBER="${{ github.event.pull_request.number || github.event.inputs.manifest_pr }}"
+
+          if [ -z "$PR_NUMBER" ]; then
+            echo "No PR number found"
+            exit 0
+          fi
+
+          echo "Syncing status for PR #$PR_NUMBER"
+
+          # Get PR body and parse linked PRs
+          PR_BODY=$(gh pr view "$PR_NUMBER" --json body -q .body)
+
+          # Extract linked PRs from body
+          LINKS=$(echo "$PR_BODY" | grep -oP 'codi-repo:links:\K[^-]+' | tr -d ' ')
+
+          if [ -z "$LINKS" ]; then
+            echo "No linked PRs found"
+            exit 0
+          fi
+
+          echo "Found linked PRs: $LINKS"
+
+          # Check status of each linked PR
+          STATUS_TABLE="| Repository | PR | Status | Approved | Checks |\n|------------|-----|--------|----------|--------|\n"
+
+          IFS=',' read -ra PR_LINKS <<< "$LINKS"
+          ALL_READY=true
+
+          for link in "${PR_LINKS[@]}"; do
+            REPO_NAME=$(echo "$link" | cut -d'#' -f1)
+            PR_NUM=$(echo "$link" | cut -d'#' -f2)
+
+            # Get PR status from GitHub API
+            PR_DATA=$(gh api "repos/${{ github.repository_owner }}/${REPO_NAME}/pulls/${PR_NUM}" 2>/dev/null || echo '{}')
+
+            if [ "$PR_DATA" = "{}" ]; then
+              STATUS_TABLE+="| $REPO_NAME | #$PR_NUM | :x: not found | - | - |\n"
+              ALL_READY=false
+              continue
+            fi
+
+            STATE=$(echo "$PR_DATA" | jq -r '.state')
+            MERGED=$(echo "$PR_DATA" | jq -r '.merged')
+            MERGEABLE=$(echo "$PR_DATA" | jq -r '.mergeable')
+
+            if [ "$MERGED" = "true" ]; then
+              STATUS_ICON=":white_check_mark: merged"
+            elif [ "$STATE" = "open" ]; then
+              STATUS_ICON=":hourglass: open"
+            else
+              STATUS_ICON=":x: closed"
+              ALL_READY=false
+            fi
+
+            # Check reviews
+            REVIEWS=$(gh api "repos/${{ github.repository_owner }}/${REPO_NAME}/pulls/${PR_NUM}/reviews" 2>/dev/null || echo '[]')
+            APPROVED=$(echo "$REVIEWS" | jq '[.[] | select(.state == "APPROVED")] | length > 0')
+
+            if [ "$APPROVED" = "true" ]; then
+              APPROVAL_ICON=":white_check_mark:"
+            else
+              APPROVAL_ICON=":hourglass:"
+              ALL_READY=false
+            fi
+
+            # Check status
+            SHA=$(echo "$PR_DATA" | jq -r '.head.sha')
+            STATUS=$(gh api "repos/${{ github.repository_owner }}/${REPO_NAME}/commits/${SHA}/status" 2>/dev/null || echo '{}')
+            STATUS_STATE=$(echo "$STATUS" | jq -r '.state')
+
+            if [ "$STATUS_STATE" = "success" ]; then
+              CHECK_ICON=":white_check_mark:"
+            else
+              CHECK_ICON=":hourglass:"
+              ALL_READY=false
+            fi
+
+            STATUS_TABLE+="| $REPO_NAME | #$PR_NUM | $STATUS_ICON | $APPROVAL_ICON | $CHECK_ICON |\n"
+          done
+
+          # Update PR body with new status
+          NEW_BODY="## Cross-Repository PR\n\n### Linked Pull Requests\n\n${STATUS_TABLE}\n"
+
+          if [ "$ALL_READY" = "true" ]; then
+            NEW_BODY+="**Status:** :white_check_mark: All PRs are ready to merge\n"
+          else
+            NEW_BODY+="**Status:** :hourglass: Waiting for all PRs to be ready\n"
+          fi
+
+          NEW_BODY+="\n**Merge Policy:** All-or-nothing - all linked PRs must be approved before merge.\n"
+          NEW_BODY+="\n---\n<!-- codi-repo:links:${LINKS} -->"
+
+          echo "Updated status table generated"

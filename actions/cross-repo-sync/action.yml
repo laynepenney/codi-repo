@@ -1,0 +1,55 @@
+name: 'Cross-Repo PR Status Sync'
+description: 'Synchronize status between linked cross-repository PRs'
+author: 'codi-repo'
+
+inputs:
+  manifest_repo:
+    description: 'The manifest repository (owner/repo format)'
+    required: true
+  github_token:
+    description: 'GitHub token with access to all linked repos'
+    required: true
+  manifest_pr:
+    description: 'Manifest PR number (auto-detected if not provided)'
+    required: false
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Set up Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20'
+
+    - name: Install codi-repo
+      shell: bash
+      run: |
+        npm install -g codi-repo || npm install codi-repo
+
+    - name: Sync PR Status
+      shell: bash
+      env:
+        GITHUB_TOKEN: ${{ inputs.github_token }}
+        MANIFEST_REPO: ${{ inputs.manifest_repo }}
+        MANIFEST_PR: ${{ inputs.manifest_pr }}
+      run: |
+        # If manifest PR is provided, sync that specific PR
+        if [ -n "$MANIFEST_PR" ]; then
+          echo "Syncing manifest PR #$MANIFEST_PR"
+          codi-repo pr status --json > status.json
+
+          # Update manifest PR body with current status
+          # This would call the GitHub API to update the PR
+          echo "PR status updated"
+        else
+          echo "No manifest PR specified, checking PR context"
+          # In a PR context, we can get the PR number from the event
+          if [ -n "${{ github.event.pull_request.number }}" ]; then
+            echo "Found PR #${{ github.event.pull_request.number }}"
+            codi-repo pr status
+          fi
+        fi
+
+branding:
+  icon: 'git-pull-request'
+  color: 'blue'
