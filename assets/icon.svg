@@ -1,30 +1,31 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
   <defs>
     <linearGradient id="icon-gradient" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" style="stop-color:#8B5CF6"/>
-      <stop offset="100%" style="stop-color:#3B82F6"/>
+      <stop offset="0%" style="stop-color:#10B981"/>
+      <stop offset="50%" style="stop-color:#059669"/>
+      <stop offset="100%" style="stop-color:#047857"/>
     </linearGradient>
   </defs>
 
   <!-- Outer rounded square -->
   <rect x="4" y="4" width="56" height="56" rx="12" fill="url(#icon-gradient)"/>
 
-  <!-- Central hub node -->
-  <circle cx="32" cy="32" r="8" fill="white" opacity="0.95"/>
+  <!-- Central grip hub -->
+  <circle cx="32" cy="32" r="9" fill="white" opacity="0.95"/>
 
-  <!-- Connection lines to outer nodes -->
-  <line x1="32" y1="32" x2="18" y2="18" stroke="white" stroke-width="2.5" opacity="0.7"/>
-  <line x1="32" y1="32" x2="46" y2="18" stroke="white" stroke-width="2.5" opacity="0.7"/>
-  <line x1="32" y1="32" x2="18" y2="46" stroke="white" stroke-width="2.5" opacity="0.7"/>
-  <line x1="32" y1="32" x2="46" y2="46" stroke="white" stroke-width="2.5" opacity="0.7"/>
+  <!-- Three branches being gripped -->
+  <!-- Top branch -->
+  <path d="M32 23 L32 12" stroke="white" stroke-width="3" stroke-linecap="round"/>
+  <circle cx="32" cy="10" r="4" fill="white"/>
 
-  <!-- Outer repo nodes -->
-  <circle cx="18" cy="18" r="5" fill="white" opacity="0.9"/>
-  <circle cx="46" cy="18" r="5" fill="white" opacity="0.9"/>
-  <circle cx="18" cy="46" r="5" fill="white" opacity="0.9"/>
-  <circle cx="46" cy="46" r="5" fill="white" opacity="0.9"/>
+  <!-- Bottom-left branch -->
+  <path d="M25 37 L14 48" stroke="white" stroke-width="3" stroke-linecap="round"/>
+  <circle cx="12" cy="50" r="4" fill="white"/>
 
-  <!-- Sparkle accents -->
-  <circle cx="52" cy="12" r="2.5" fill="white" opacity="0.8"/>
-  <circle cx="56" cy="8" r="1.5" fill="white" opacity="0.6"/>
+  <!-- Bottom-right branch -->
+  <path d="M39 37 L50 48" stroke="white" stroke-width="3" stroke-linecap="round"/>
+  <circle cx="52" cy="50" r="4" fill="white"/>
+
+  <!-- Inner grip detail -->
+  <circle cx="32" cy="32" r="4" fill="url(#icon-gradient)"/>
 </svg>

@@ -1,73 +1,71 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 200" width="800" height="200">
   <defs>
     <linearGradient id="banner-gradient" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" style="stop-color:#8B5CF6"/>
-      <stop offset="50%" style="stop-color:#6366F1"/>
-      <stop offset="100%" style="stop-color:#3B82F6"/>
+      <stop offset="0%" style="stop-color:#10B981"/>
+      <stop offset="50%" style="stop-color:#059669"/>
+      <stop offset="100%" style="stop-color:#047857"/>
     </linearGradient>
     <linearGradient id="bg-gradient" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" style="stop-color:#0f0f1a"/>
-      <stop offset="100%" style="stop-color:#1a1a2e"/>
+      <stop offset="0%" style="stop-color:#0a0a0f"/>
+      <stop offset="100%" style="stop-color:#111827"/>
     </linearGradient>
   </defs>
 
   <!-- Background -->
   <rect width="800" height="200" fill="url(#bg-gradient)"/>
 
-  <!-- Decorative connection lines in background -->
-  <g opacity="0.1" stroke="#8B5CF6" stroke-width="1">
-    <line x1="50" y1="40" x2="120" y2="80"/>
-    <line x1="120" y1="80" x2="80" y2="140"/>
-    <line x1="120" y1="80" x2="180" y2="60"/>
-    <line x1="650" y1="120" x2="720" y2="80"/>
-    <line x1="720" y1="80" x2="750" y2="140"/>
-    <line x1="720" y1="80" x2="680" y2="40"/>
+  <!-- Decorative git branch lines in background -->
+  <g opacity="0.15" stroke="#10B981" stroke-width="1.5">
+    <!-- Left side branches -->
+    <path d="M40 100 Q80 60 120 80" fill="none"/>
+    <path d="M40 100 Q80 140 120 120" fill="none"/>
+    <circle cx="40" cy="100" r="4" fill="#10B981"/>
+    <circle cx="120" cy="80" r="3" fill="#059669"/>
+    <circle cx="120" cy="120" r="3" fill="#059669"/>
+
+    <!-- Right side branches -->
+    <path d="M760 100 Q720 60 680 80" fill="none"/>
+    <path d="M760 100 Q720 140 680 120" fill="none"/>
+    <circle cx="760" cy="100" r="4" fill="#10B981"/>
+    <circle cx="680" cy="80" r="3" fill="#059669"/>
+    <circle cx="680" cy="120" r="3" fill="#059669"/>
   </g>
 
-  <!-- Background nodes -->
-  <circle cx="50" cy="40" r="4" fill="#8B5CF6" opacity="0.2"/>
-  <circle cx="120" cy="80" r="6" fill="#6366F1" opacity="0.25"/>
-  <circle cx="80" cy="140" r="4" fill="#3B82F6" opacity="0.2"/>
-  <circle cx="180" cy="60" r="3" fill="#A78BFA" opacity="0.15"/>
-  <circle cx="650" cy="120" r="4" fill="#8B5CF6" opacity="0.2"/>
-  <circle cx="720" cy="80" r="6" fill="#6366F1" opacity="0.25"/>
-  <circle cx="750" cy="140" r="4" fill="#3B82F6" opacity="0.2"/>
-  <circle cx="680" cy="40" r="3" fill="#60A5FA" opacity="0.15"/>
-
   <!-- Floating particles -->
-  <circle cx="100" cy="160" r="2" fill="#8B5CF6" opacity="0.4"/>
-  <circle cx="700" cy="40" r="2" fill="#3B82F6" opacity="0.4"/>
-  <circle cx="200" cy="30" r="1.5" fill="#A78BFA" opacity="0.3"/>
-  <circle cx="600" cy="170" r="1.5" fill="#60A5FA" opacity="0.3"/>
+  <circle cx="150" cy="40" r="2" fill="#10B981" opacity="0.3"/>
+  <circle cx="200" cy="160" r="1.5" fill="#059669" opacity="0.25"/>
+  <circle cx="600" cy="30" r="2" fill="#047857" opacity="0.3"/>
+  <circle cx="650" cy="170" r="1.5" fill="#10B981" opacity="0.25"/>
 
   <!-- Main logo group centered -->
-  <g transform="translate(250, 50)">
+  <g transform="translate(220, 45)">
     <!-- Icon background -->
-    <rect x="0" y="0" width="100" height="100" rx="20" fill="url(#banner-gradient)"/>
+    <rect x="0" y="0" width="110" height="110" rx="22" fill="url(#banner-gradient)"/>
 
-    <!-- Central hub node -->
-    <circle cx="50" cy="50" r="12" fill="white" opacity="0.95"/>
+    <!-- Central grip hub -->
+    <circle cx="55" cy="55" r="14" fill="white" opacity="0.95"/>
 
-    <!-- Connection lines -->
-    <line x1="50" y1="50" x2="28" y2="28" stroke="white" stroke-width="3" opacity="0.7"/>
-    <line x1="50" y1="50" x2="72" y2="28" stroke="white" stroke-width="3" opacity="0.7"/>
-    <line x1="50" y1="50" x2="28" y2="72" stroke="white" stroke-width="3" opacity="0.7"/>
-    <line x1="50" y1="50" x2="72" y2="72" stroke="white" stroke-width="3" opacity="0.7"/>
+    <!-- Three branches being gripped -->
+    <!-- Top branch -->
+    <path d="M55 41 L55 24" stroke="white" stroke-width="4" stroke-linecap="round"/>
+    <circle cx="55" cy="20" r="6" fill="white"/>
 
-    <!-- Outer nodes -->
-    <circle cx="28" cy="28" r="7" fill="white" opacity="0.9"/>
-    <circle cx="72" cy="28" r="7" fill="white" opacity="0.9"/>
-    <circle cx="28" cy="72" r="7" fill="white" opacity="0.9"/>
-    <circle cx="72" cy="72" r="7" fill="white" opacity="0.9"/>
+    <!-- Bottom-left branch -->
+    <path d="M44 63 L28 79" stroke="white" stroke-width="4" stroke-linecap="round"/>
+    <circle cx="24" cy="83" r="6" fill="white"/>
 
-    <!-- Sparkles on icon -->
-    <circle cx="86" cy="18" r="4" fill="white" opacity="0.8"/>
-    <circle cx="94" cy="10" r="2" fill="white" opacity="0.6"/>
+    <!-- Bottom-right branch -->
+    <path d="M66 63 L82 79" stroke="white" stroke-width="4" stroke-linecap="round"/>
+    <circle cx="86" cy="83" r="6" fill="white"/>
 
-    <!-- Text "codi-repo" -->
-    <text x="120" y="65" font-family="system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" font-size="56" font-weight="700" fill="white">codi-repo</text>
+    <!-- Inner grip detail -->
+    <circle cx="55" cy="55" r="6" fill="url(#banner-gradient)"/>
+
+    <!-- Text "gitgrip" -->
+    <text x="130" y="72" font-family="system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" font-size="60" font-weight="700" fill="white">gitgrip</text>
   </g>
 
   <!-- Tagline -->
-  <text x="400" y="175" text-anchor="middle" font-family="system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" font-size="18" fill="#9CA3AF">Multi-repo orchestration for unified PR workflows</text>
+  <text x="400" y="178" text-anchor="middle" font-family="system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" font-size="20" font-weight="500" fill="#6EE7B7">git a grip</text>
+  <text x="400" y="198" text-anchor="middle" font-family="system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" font-size="14" fill="#9CA3AF">Multi-repo workflow tool</text>
 </svg>

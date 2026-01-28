@@ -1,6 +1,18 @@
-# gitgrip
+<p align="center">
+  <img src="assets/banner.svg" alt="gitgrip - git a grip" width="600">
+</p>
 
-**git a grip** - Multi-repo workflow tool
+<p align="center">
+  <a href="https://www.npmjs.com/package/gitgrip"><img src="https://img.shields.io/npm/v/gitgrip.svg?style=flat-square&color=10B981" alt="npm version"></a>
+  <a href="https://github.com/laynepenney/gitgrip/blob/main/LICENSE"><img src="https://img.shields.io/npm/l/gitgrip.svg?style=flat-square&color=059669" alt="license"></a>
+  <a href="https://www.npmjs.com/package/gitgrip"><img src="https://img.shields.io/npm/dm/gitgrip.svg?style=flat-square&color=047857" alt="downloads"></a>
+</p>
+
+<p align="center">
+  Multi-repo workflow tool for synchronized branches, linked PRs, and atomic merges.
+</p>
+
+---
 
 Manage multiple related repositories as a single workspace with synchronized branches, linked pull requests, and atomic merges.
 
