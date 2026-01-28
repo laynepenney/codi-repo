@@ -13,6 +13,8 @@ import { link } from './commands/link.js';
 import { run } from './commands/run.js';
 import { env } from './commands/env.js';
 import { bench } from './commands/bench.js';
+import { commit } from './commands/commit.js';
+import { push } from './commands/push.js';
 import { TimingContext, formatTimingReport, setTimingContext, getTimingContext } from './lib/timing.js';
 
 const program = new Command();
@@ -247,6 +249,42 @@ program
         iterations: parseInt(options.iterations, 10),
         warmup: parseInt(options.warmup, 10),
         json: options.json,
+      });
+    } catch (error) {
+      console.error(chalk.red(error instanceof Error ? error.message : String(error)));
+      process.exit(1);
+    }
+  });
+
+// Commit command
+program
+  .command('commit')
+  .description('Commit staged changes across all repositories')
+  .option('-m, --message <message>', 'Commit message')
+  .option('-a, --all', 'Stage all changes before committing')
+  .action(async (options) => {
+    try {
+      await commit({
+        message: options.message,
+        all: options.all,
+      });
+    } catch (error) {
+      console.error(chalk.red(error instanceof Error ? error.message : String(error)));
+      process.exit(1);
+    }
+  });
+
+// Push command
+program
+  .command('push')
+  .description('Push current branch to remote across all repositories')
+  .option('-u, --set-upstream', 'Set upstream tracking for the branch')
+  .option('-f, --force', 'Force push (use with caution)')
+  .action(async (options) => {
+    try {
+      await push({
+        setUpstream: options.setUpstream,
+        force: options.force,
       });
     } catch (error) {
       console.error(chalk.red(error instanceof Error ? error.message : String(error)));

@@ -1,7 +1,7 @@
 import chalk from 'chalk';
 import ora from 'ora';
 import { loadManifest, getAllRepoInfo, getManifestsDir } from '../lib/manifest.js';
-import { pullLatest, fetchRemote, pathExists, getCurrentBranch, getRemoteUrl, setRemoteUrl, setUpstreamBranch } from '../lib/git.js';
+import { pullLatest, fetchRemote, pathExists, getCurrentBranch, getRemoteUrl, setRemoteUrl, setUpstreamBranch, safePullLatest } from '../lib/git.js';
 import { processAllLinks } from '../lib/files.js';
 import { runHooks } from '../lib/hooks.js';
 import { getTimingContext } from '../lib/timing.js';
@@ -48,8 +48,19 @@ export async function sync(options: SyncOptions = {}): Promise<void> {
       await fetchRemote(manifestsDir);
       manifestSpinner.succeed('Fetched manifest updates');
     } else {
-      await pullLatest(manifestsDir);
-      manifestSpinner.succeed('Pulled latest manifest');
+      // Use safePullLatest to handle case where tracking branch was deleted (after PR merge)
+      const defaultBranch = manifest.manifest?.default_branch ?? 'main';
+      const result = await safePullLatest(manifestsDir, defaultBranch);
+
+      if (result.pulled) {
+        if (result.recovered) {
+          manifestSpinner.succeed(`Pulled latest manifest (${result.message})`);
+        } else {
+          manifestSpinner.succeed('Pulled latest manifest');
+        }
+      } else {
+        throw new Error(result.message ?? 'Unknown error');
+      }
     }
   } catch (error) {
     const errorMsg = error instanceof Error ? error.message : String(error);
