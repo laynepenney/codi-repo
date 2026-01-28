@@ -24,9 +24,10 @@ program
 program
   .command('init <manifest-url>')
   .description('Initialize a codi-repo workspace from a manifest repository')
-  .action(async (manifestUrl) => {
+  .option('-b, --branch <branch>', 'Branch to clone from manifest repository')
+  .action(async (manifestUrl, options) => {
     try {
-      await init(manifestUrl);
+      await init(manifestUrl, { branch: options.branch });
     } catch (error) {
       console.error(chalk.red(error instanceof Error ? error.message : String(error)));
       process.exit(1);

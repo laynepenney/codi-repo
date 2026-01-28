@@ -40,6 +40,8 @@ export interface RepoConfig {
 export interface ManifestRepoConfig {
   /** Git URL for the manifest repository */
   url: string;
+  /** Default branch name (e.g., main, master) */
+  default_branch?: string;
   /** Files to copy from manifest repo to workspace */
   copyfile?: CopyFileConfig[];
   /** Symlinks to create from manifest repo to workspace */

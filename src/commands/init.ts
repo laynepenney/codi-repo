@@ -11,6 +11,11 @@ import {
 } from '../lib/manifest.js';
 import { cloneRepo, pathExists } from '../lib/git.js';
 
+export interface InitOptions {
+  /** Branch to clone from manifest repository */
+  branch?: string;
+}
+
 /**
  * Initialize a new codi-repo workspace (AOSP-style)
  *
@@ -20,7 +25,7 @@ import { cloneRepo, pathExists } from '../lib/git.js';
  * 3. Reads manifest.yaml from the cloned repo
  * 4. Clones all repositories defined in the manifest
  */
-export async function init(manifestUrl: string): Promise<void> {
+export async function init(manifestUrl: string, options: InitOptions = {}): Promise<void> {
   const cwd = process.cwd();
   const codiRepoDir = getCodiRepoDir(cwd);
   const manifestsDir = getManifestsDir(cwd);
@@ -51,9 +56,10 @@ export async function init(manifestUrl: string): Promise<void> {
   }
 
   // Clone manifest repository into .codi-repo/manifests/
-  const cloneSpinner = ora(`Cloning manifest from ${manifestUrl}...`).start();
+  const branchInfo = options.branch ? ` (branch: ${options.branch})` : '';
+  const cloneSpinner = ora(`Cloning manifest from ${manifestUrl}${branchInfo}...`).start();
   try {
-    await cloneRepo(manifestUrl, manifestsDir);
+    await cloneRepo(manifestUrl, manifestsDir, options.branch);
     cloneSpinner.succeed('Cloned manifest repository');
   } catch (error) {
     cloneSpinner.fail('Failed to clone manifest repository');

@@ -196,8 +196,13 @@ export async function loadManifest(manifestPath?: string): Promise<{ manifest: M
     }
   }
 
-  // Validate manifest-level copyfile/linkfile entries
+  // Validate manifest-level config
   if (parsed.manifest) {
+    // Default manifest branch to 'main'
+    if (!parsed.manifest.default_branch) {
+      parsed.manifest.default_branch = 'main';
+    }
+
     if (parsed.manifest.copyfile) {
       if (!Array.isArray(parsed.manifest.copyfile)) {
         throw new Error('manifest.copyfile must be an array');
