@@ -11,6 +11,48 @@ _No items pending review._
 
 ---
 
+## Session Reports
+
+### Commercial Plugin Architecture Implementation (2026-01-28)
+
+**Overall Assessment**: `cr` worked very well for this multi-repo workflow. The core commands handled the majority of operations smoothly.
+
+#### What Worked Well ✅
+
+1. **`cr branch`** - Created branches across all 4 repos seamlessly
+2. **`cr status`** - Excellent visibility into repo states, showed changes clearly
+3. **`cr add`, `cr commit`, `cr push`** - Worked exactly as expected across repos
+4. **`cr pr create`** - Created linked PRs in both codi and codi-private correctly
+5. **`cr pr status`** - Showed PR status with checks, approval, mergeable state
+6. **`cr sync`** - Pulled and synced repos correctly after merges
+7. **`cr checkout main`** - Switched all repos back to main after merge
+8. **`cr diff --stat`** - Useful for reviewing changes before commit
+
+#### Issues Created
+
+| Issue | Title |
+|-------|-------|
+| #25 | fix: improve error handling for cr pr merge failures |
+| #26 | fix: cr pr status shows stale check status |
+| #27 | feat: add cr branch --delete for cleanup |
+| #28 | feat: add cr rebase with upstream branch tracking |
+| #29 | feat: add cr pr diff to show combined PR diff |
+| #30 | feat: add cr pr checks to show CI status |
+
+#### Raw Commands Used (Friction Log)
+
+| Raw Command | Why `cr` Couldn't Handle It | Issue |
+|-------------|----------------------------|-------|
+| `git fetch origin main && git rebase origin/main` | No rebase command | #28 |
+| `git push --force-with-lease` | No force push after rebase | #28 |
+| `gh pr merge 209 --squash` | `cr pr merge` failed with 405 | #25 |
+| `gh pr diff 209` | No PR diff command | #29 |
+| `gh pr checks 209` | No PR checks command | #30 |
+| `git branch -d feat/...` | No branch delete command | #27 |
+| `git push origin --delete feat/...` | No remote branch delete | #27 |
+
+---
+
 ## Approved (Ready for Issues)
 
 _No items approved._
