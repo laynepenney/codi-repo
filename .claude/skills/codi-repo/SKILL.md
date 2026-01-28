@@ -1,0 +1,151 @@
+---
+name: codi-repo
+description: Multi-repository workflow using codi-repo (cr). Use this when working with multiple repos, creating branches across repos, syncing repos, creating linked pull requests, or any cross-repo operations.
+allowed-tools: Bash(cr *), Bash(node */codi-repo/dist/index.js *)
+---
+
+# codi-repo Multi-Repository Workflow
+
+You are working in a multi-repository workspace managed by **codi-repo** (alias: `cr`). Always use `cr` commands for git operations across repos.
+
+## Essential Commands
+
+### Check Status First
+```bash
+cr status                    # Always check status before operations
+```
+
+### Syncing
+```bash
+cr sync                      # Pull latest from all repos + process links + run hooks
+cr sync --fetch              # Fetch only (no merge)
+cr sync --no-link            # Skip file linking
+cr sync --no-hooks           # Skip post-sync hooks
+```
+
+### Branching
+```bash
+cr branch feat/my-feature    # Create branch across ALL repos
+cr checkout feat/my-feature  # Switch branch across ALL repos
+cr checkout -b new-branch    # Create and switch to new branch
+```
+
+### Pull Request Workflow
+
+**All changes must go through pull requests.**
+
+```bash
+# 1. Create linked PRs across repos with changes
+cr pr create -t "feat: description"
+cr pr create -t "title" -b "body" --draft    # Draft PR with body
+
+# 2. Check PR status
+cr pr status
+cr pr status --json
+
+# 3. Merge all linked PRs together
+cr pr merge                  # Default merge
+cr pr merge -m squash        # Squash merge
+cr pr merge -m rebase        # Rebase merge
+cr pr merge --no-delete-branch  # Keep branches after merge
+```
+
+### File Linking
+```bash
+cr link                      # Create/update all copyfile and linkfile entries
+cr link --status             # Show link status (valid, broken, missing)
+cr link --clean              # Remove orphaned links
+cr link --force              # Overwrite existing files/links
+cr link --dry-run            # Preview changes
+```
+
+### Workspace Scripts
+```bash
+cr run --list                # List available scripts
+cr run build                 # Run a named script
+cr run build -- --verbose    # Pass arguments to script
+cr env                       # Show workspace environment variables
+```
+
+## Workflow Rules
+
+1. **Always run `cr sync` before starting new work**
+2. **Always use `cr branch` to create branches** - Creates across all repos simultaneously
+3. **Never use raw `git` commands** for branch/checkout/push operations
+4. **Always use pull requests** - No direct pushes to main
+5. **Check `cr status` frequently** - Before and after operations
+
+## Typical Workflow
+
+```bash
+# Starting new work
+cr sync
+cr status
+cr branch feat/my-feature
+
+# After making changes
+cr status                           # Verify changes
+cr pr create -t "feat: my feature"  # Create linked PRs
+
+# After PR approval
+cr pr merge
+cr sync
+cr checkout main
+```
+
+## Manifest Structure
+
+The workspace manifest is at `.codi-repo/manifests/manifest.yaml`:
+
+```yaml
+version: 1
+
+manifest:
+  url: git@github.com:org/manifest.git
+  default_branch: main
+  linkfile:
+    - src: CLAUDE.md
+      dest: CLAUDE.md
+
+repos:
+  repo-name:
+    url: git@github.com:org/repo.git
+    path: ./repo-name
+    default_branch: main
+    copyfile:
+      - src: config.example
+        dest: config.example
+    linkfile:
+      - src: dist
+        dest: .bin/tool
+
+workspace:
+  env:
+    NODE_ENV: development
+  scripts:
+    build:
+      description: "Build all packages"
+      command: "pnpm -r build"
+  hooks:
+    post-sync:
+      - command: "pnpm install"
+        cwd: "./repo-name"
+```
+
+## Error Recovery
+
+If you encounter issues:
+
+```bash
+# Check what's happening
+cr status
+
+# If repos are out of sync
+cr sync
+
+# If on wrong branch
+cr checkout correct-branch
+
+# If links are broken
+cr link --force
+```
