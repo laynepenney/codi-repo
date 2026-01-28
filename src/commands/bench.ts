@@ -45,7 +45,7 @@ const BENCHMARKS: Record<string, { description: string; fn: () => Promise<void> 
       const repos = getAllRepoInfo(manifest, rootDir);
       for (const repo of repos) {
         if (await pathExists(repo.absolutePath)) {
-          await branchExists(repo.absolutePath, 'main');
+          await branchExists(repo.absolutePath, repo.default_branch);
         }
       }
     },
@@ -132,11 +132,17 @@ export async function bench(operation: string | undefined, options: BenchOptions
         process.stdout.write(`  ${name}...`);
       }
 
-      const result = await runSingleBenchmark(name, { iterations, warmup });
-      results.push(result);
+      try {
+        const result = await runSingleBenchmark(name, { iterations, warmup });
+        results.push(result);
 
-      if (!json) {
-        console.log(chalk.green(' done'));
+        if (!json) {
+          console.log(chalk.green(' done'));
+        }
+      } catch (error) {
+        if (!json) {
+          console.log(chalk.red(` failed: ${error instanceof Error ? error.message : String(error)}`));
+        }
       }
     }
 

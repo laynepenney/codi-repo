@@ -212,7 +212,8 @@ function formatEntry(entry: TimingEntry, indent = 0, isLast = true, prefix = '')
     lines.push(`  ${entry.label.padEnd(24)} ${duration}`);
   } else {
     const connector = isLast ? '└─' : '├─';
-    lines.push(`  ${prefix}${connector} ${entry.label.padEnd(22 - prefix.length)} ${duration}`);
+    const labelPad = Math.max(0, 22 - prefix.length);
+    lines.push(`  ${prefix}${connector} ${entry.label.padEnd(labelPad)} ${duration}`);
   }
 
   if (entry.children && entry.children.length > 0) {
