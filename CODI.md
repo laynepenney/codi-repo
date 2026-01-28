@@ -88,3 +88,16 @@ Test files are in `src/lib/__tests__/`.
 - Use `chalk` for colored output
 - Use `ora` for spinners
 - Validate manifest schema in `lib/manifest.ts`
+
+## Continuous Improvement
+
+codi-repo is self-improving. When using `cr` commands, capture any friction or ideas in:
+
+```
+./IMPROVEMENTS.md
+```
+
+**Do NOT create GitHub issues directly.** Instead:
+1. Add observations to IMPROVEMENTS.md under "Pending Review"
+2. Prompt the user: "I added [observation] to IMPROVEMENTS.md. Want me to create an issue?"
+3. Only create issues after user approval
