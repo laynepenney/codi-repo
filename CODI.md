@@ -13,7 +13,7 @@ pnpm lint             # Lint code
 
 ## Git Workflow
 
-**IMPORTANT: Never push directly to main.** Always use feature branches and pull requests.
+**IMPORTANT:** Never push directly to main. Never use raw `git` commands. Always use `cr` for all operations.
 
 ### Branch Strategy
 
@@ -21,45 +21,51 @@ pnpm lint             # Lint code
 - Production-ready code
 - Protected with PR requirements
 - All PRs must target `main`
-- Use `git pull origin main --rebase` to stay current
+- Use `cr sync` to stay current (not `git pull`)
 
 **Feature Branches (`feat/*`, `fix/*`, `chore/*`)**
 - All development happens here
 - Short-lived, deleted after merge
-- Always rebase from `origin/main`, never merge
-
-### Rebase vs Merge
-
-**✅ Use REBASE** (correct):
-```bash
-git rebase origin/main           # Keeps history linear
-git push --force-with-lease      # Safe force-push after rebase
-```
-
-**❌ DO NOT Use MERGE** (incorrect):
-```bash
-git merge origin/main            # Creates unnecessary merge commits
-```
 
 ### Standard Workflow
 
 ```bash
 # Start new work
 cr sync                              # Pull latest from all repos
+cr status                            # Verify clean state
 cr branch feat/my-feature            # Create branch across repos
 
 # Make changes...
+cr diff                              # Review changes
 cr add .                             # Stage changes across repos
 cr commit -m "feat: description"     # Commit across repos
 cr push -u                           # Push with upstream tracking
 
 # Create PR
-cr pr create -t "feat: description"  # Create linked PRs
+cr pr create -t "feat: description" --push
 
 # After PR merged
 cr sync                              # Pull latest and cleanup
 cr checkout main                     # Switch back to main
 ```
+
+### IMPORTANT: Never Use Raw Git
+
+All git operations must go through `cr`. There is no exception.
+
+```
+❌ WRONG:
+   git checkout -b feat/x
+   git add . && git commit -m "msg" && git push
+   gh pr create --title "msg"
+
+✅ CORRECT:
+   cr branch feat/x
+   cr add . && cr commit -m "msg" && cr push -u
+   cr pr create -t "msg" --push
+```
+
+`cr` manages all repos and the manifest together. Using raw `git` or `gh` bypasses multi-repo coordination and will miss the manifest repo.
 
 ### PR Review Process
 

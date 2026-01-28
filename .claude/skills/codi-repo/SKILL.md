@@ -105,11 +105,12 @@ cr bench manifest-load -n 10 # Run specific benchmark
 
 ## Workflow Rules
 
-1. **Always run `cr sync` before starting new work**
-2. **Always use `cr branch` to create branches** - Creates across all repos simultaneously
-3. **Use `cr add`, `cr commit`, `cr push`** instead of raw git commands
-4. **Always use pull requests** - No direct pushes to main
+1. **NEVER use raw `git` or `gh` commands** - Use `cr` for ALL operations (branch, add, commit, push, PR)
+2. **Always run `cr sync` before starting new work**
+3. **Always use `cr branch` to create branches** - Creates across all repos simultaneously
+4. **Always use pull requests** - `cr pr create`, never push directly to main
 5. **Check `cr status` frequently** - Before and after operations
+6. **`cr` handles the manifest repo automatically** - No need for separate git operations in `.codi-repo/manifests/`
 
 ## Typical Workflow
 
