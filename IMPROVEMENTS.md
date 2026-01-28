@@ -7,7 +7,19 @@ Items here should be reviewed before creating GitHub issues.
 
 ## Pending Review
 
-_No items pending review._
+#### `cr forall` command (like AOSP `repo forall`)
+- **Problem**: Some git operations (rebase, cherry-pick, stash, etc.) don't have dedicated `cr` commands yet, forcing users to run raw `git` in each repo manually
+- **Observation**: AOSP's `repo` tool solves this with `repo forall -c "git command"` which runs a shell command in every repo directory
+- **Proposal**: Add `cr forall -c "command"` that runs an arbitrary command in each repo (and optionally the manifest)
+- **Example usage**:
+  ```bash
+  cr forall -c "git rebase origin/main"       # Rebase all repos
+  cr forall -c "git stash"                     # Stash all repos
+  cr forall -c "pnpm install"                  # Install deps in all repos
+  cr forall --repo tooling -c "git log -5"     # Run in specific repo only
+  cr forall --include-manifest -c "git rebase origin/main"  # Include manifest
+  ```
+- **Priority**: Medium - eliminates the last reason to use raw `git` commands
 
 ---
 
