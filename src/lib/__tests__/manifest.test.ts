@@ -6,9 +6,8 @@ import {
   parseGitHubUrl,
   generateSampleManifest,
   findManifestPath,
-  findLegacyManifestPath,
   loadManifest,
-  getCodiRepoDir,
+  getGitgripDir,
   getManifestsDir,
   getManifestPath,
 } from '../manifest.js';
@@ -64,18 +63,15 @@ describe('generateSampleManifest', () => {
 });
 
 describe('path helpers', () => {
-  it('getCodiRepoDir returns correct path for new workspaces', () => {
-    // For paths that don't exist, defaults to new .gitgrip directory
-    expect(getCodiRepoDir('/workspace')).toBe('/workspace/.gitgrip');
+  it('getGitgripDir returns correct path', () => {
+    expect(getGitgripDir('/workspace')).toBe('/workspace/.gitgrip');
   });
 
-  it('getManifestsDir returns correct path for new workspaces', () => {
-    // For paths that don't exist, defaults to new .gitgrip directory
+  it('getManifestsDir returns correct path', () => {
     expect(getManifestsDir('/workspace')).toBe('/workspace/.gitgrip/manifests');
   });
 
-  it('getManifestPath returns correct path for new workspaces', () => {
-    // For paths that don't exist, defaults to new .gitgrip directory
+  it('getManifestPath returns correct path', () => {
     expect(getManifestPath('/workspace')).toBe('/workspace/.gitgrip/manifests/manifest.yaml');
   });
 });
@@ -84,7 +80,7 @@ describe('findManifestPath', () => {
   let testDir: string;
 
   beforeEach(async () => {
-    testDir = join(tmpdir(), `codi-repo-test-${Date.now()}`);
+    testDir = join(tmpdir(), `gitgrip-test-${Date.now()}`);
     await mkdir(testDir, { recursive: true });
   });
 
@@ -92,8 +88,8 @@ describe('findManifestPath', () => {
     await rm(testDir, { recursive: true, force: true });
   });
 
-  it('finds manifest in .codi-repo/manifests/', async () => {
-    const manifestsDir = join(testDir, '.codi-repo', 'manifests');
+  it('finds manifest in .gitgrip/manifests/', async () => {
+    const manifestsDir = join(testDir, '.gitgrip', 'manifests');
     await mkdir(manifestsDir, { recursive: true });
     await writeFile(join(manifestsDir, 'manifest.yaml'), 'version: 1\nrepos: {}');
 
@@ -102,7 +98,7 @@ describe('findManifestPath', () => {
   });
 
   it('finds manifest from subdirectory', async () => {
-    const manifestsDir = join(testDir, '.codi-repo', 'manifests');
+    const manifestsDir = join(testDir, '.gitgrip', 'manifests');
     const subDir = join(testDir, 'some', 'nested', 'dir');
     await mkdir(manifestsDir, { recursive: true });
     await mkdir(subDir, { recursive: true });
@@ -118,45 +114,11 @@ describe('findManifestPath', () => {
   });
 });
 
-describe('findLegacyManifestPath', () => {
-  let testDir: string;
-
-  beforeEach(async () => {
-    testDir = join(tmpdir(), `codi-repo-legacy-test-${Date.now()}`);
-    await mkdir(testDir, { recursive: true });
-  });
-
-  afterEach(async () => {
-    await rm(testDir, { recursive: true, force: true });
-  });
-
-  it('finds legacy codi-repos.yaml', async () => {
-    await writeFile(join(testDir, 'codi-repos.yaml'), 'version: 1\nrepos: {}');
-
-    const found = await findLegacyManifestPath(testDir);
-    expect(found).toBe(join(testDir, 'codi-repos.yaml'));
-  });
-
-  it('finds legacy manifest from subdirectory', async () => {
-    const subDir = join(testDir, 'some', 'nested', 'dir');
-    await mkdir(subDir, { recursive: true });
-    await writeFile(join(testDir, 'codi-repos.yaml'), 'version: 1\nrepos: {}');
-
-    const found = await findLegacyManifestPath(subDir);
-    expect(found).toBe(join(testDir, 'codi-repos.yaml'));
-  });
-
-  it('returns null when no legacy manifest exists', async () => {
-    const found = await findLegacyManifestPath(testDir);
-    expect(found).toBeNull();
-  });
-});
-
 describe('loadManifest', () => {
   let testDir: string;
 
   beforeEach(async () => {
-    testDir = join(tmpdir(), `codi-repo-load-test-${Date.now()}`);
+    testDir = join(tmpdir(), `gitgrip-load-test-${Date.now()}`);
     await mkdir(testDir, { recursive: true });
   });
 
@@ -165,7 +127,7 @@ describe('loadManifest', () => {
   });
 
   it('loads manifest and returns workspace root', async () => {
-    const manifestsDir = join(testDir, '.codi-repo', 'manifests');
+    const manifestsDir = join(testDir, '.gitgrip', 'manifests');
     await mkdir(manifestsDir, { recursive: true });
 
     const manifestContent = `
@@ -190,7 +152,7 @@ settings:
   });
 
   it('applies default settings', async () => {
-    const manifestsDir = join(testDir, '.codi-repo', 'manifests');
+    const manifestsDir = join(testDir, '.gitgrip', 'manifests');
     await mkdir(manifestsDir, { recursive: true });
 
     const manifestContent = `
@@ -210,7 +172,7 @@ repos:
   });
 
   it('throws on missing repos', async () => {
-    const manifestsDir = join(testDir, '.codi-repo', 'manifests');
+    const manifestsDir = join(testDir, '.gitgrip', 'manifests');
     await mkdir(manifestsDir, { recursive: true });
 
     const manifestContent = 'version: 1\nrepos: {}';
@@ -222,7 +184,7 @@ repos:
   });
 
   it('throws on missing url', async () => {
-    const manifestsDir = join(testDir, '.codi-repo', 'manifests');
+    const manifestsDir = join(testDir, '.gitgrip', 'manifests');
     await mkdir(manifestsDir, { recursive: true });
 
     const manifestContent = `

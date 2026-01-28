@@ -3,7 +3,6 @@
 import { Command } from 'commander';
 import chalk from 'chalk';
 import { init } from './commands/init.js';
-import { migrate } from './commands/migrate.js';
 import { sync } from './commands/sync.js';
 import { status } from './commands/status.js';
 import { branch, listBranches } from './commands/branch.js';
@@ -25,7 +24,7 @@ const program = new Command();
 program
   .name('gitgrip')
   .description('git a grip - Multi-repo workflow tool\n\nShorthand: Use "gr" instead of "gitgrip"')
-  .version('0.2.3')
+  .version('0.2.4')
   .option('--timing', 'Show timing breakdown for operations');
 
 // Set up timing hooks
@@ -52,21 +51,6 @@ program
   .action(async (manifestUrl, options) => {
     try {
       await init(manifestUrl, { branch: options.branch });
-    } catch (error) {
-      console.error(chalk.red(error instanceof Error ? error.message : String(error)));
-      process.exit(1);
-    }
-  });
-
-// Migrate command - convert legacy format to new structure
-program
-  .command('migrate')
-  .description('Migrate from legacy format to .gitgrip/manifests/ structure')
-  .option('-f, --force', 'Skip confirmation prompts')
-  .option('-r, --remote <url>', 'Remote URL to push manifest repository')
-  .action(async (options) => {
-    try {
-      await migrate(options);
     } catch (error) {
       console.error(chalk.red(error instanceof Error ? error.message : String(error)));
       process.exit(1);

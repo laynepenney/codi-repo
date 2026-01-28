@@ -134,7 +134,6 @@ Workspace configuration in `.gitgrip/manifests/manifest.yaml`:
 - `workspace`: Scripts, hooks, and environment variables
 - `settings`: PR prefix, merge strategy
 
-Note: Legacy `.codi-repo/` directories are also supported for backward compatibility.
 
 ### Commands
 All commands use `gr` (or `gitgrip`):
