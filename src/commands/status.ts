@@ -1,6 +1,7 @@
 import chalk from 'chalk';
-import { loadManifest, getAllRepoInfo } from '../lib/manifest.js';
+import { loadManifest, getAllRepoInfo, getManifestsDir } from '../lib/manifest.js';
 import { getAllRepoStatus } from '../lib/git.js';
+import { getAllLinkStatus } from '../lib/files.js';
 import type { RepoStatus } from '../types.js';
 
 interface StatusOptions {
@@ -129,6 +130,37 @@ export async function status(options: StatusOptions = {}): Promise<void> {
   const branches = new Set(statuses.filter((s) => s.exists).map((s) => s.branch));
   if (branches.size > 1) {
     console.log('');
-    console.log(chalk.yellow('  ⚠ Repositories are on different branches'));
+    console.log(chalk.yellow('  \u26a0 Repositories are on different branches'));
+  }
+
+  // Show link status summary
+  const manifestsDir = getManifestsDir(rootDir);
+  const linkStatuses = await getAllLinkStatus(manifest, rootDir, manifestsDir);
+  if (linkStatuses.length > 0) {
+    const validLinks = linkStatuses.filter((l) => l.status === 'valid').length;
+    const brokenLinks = linkStatuses.filter((l) => l.status === 'broken').length;
+    const missingLinks = linkStatuses.filter((l) => l.status === 'missing').length;
+    const conflictLinks = linkStatuses.filter((l) => l.status === 'conflict').length;
+
+    console.log('');
+    console.log(chalk.blue('Links'));
+
+    const linkParts: string[] = [];
+    linkParts.push(`${validLinks}/${linkStatuses.length} valid`);
+    if (brokenLinks > 0) {
+      linkParts.push(chalk.red(`${brokenLinks} broken`));
+    }
+    if (missingLinks > 0) {
+      linkParts.push(chalk.yellow(`${missingLinks} missing`));
+    }
+    if (conflictLinks > 0) {
+      linkParts.push(chalk.red(`${conflictLinks} conflicts`));
+    }
+
+    console.log(chalk.dim(`  ${linkParts.join(' | ')}`));
+
+    if (brokenLinks + missingLinks + conflictLinks > 0) {
+      console.log(chalk.dim(`  Run 'cr link --status' for details`));
+    }
   }
 }

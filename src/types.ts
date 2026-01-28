@@ -1,4 +1,24 @@
 /**
+ * Configuration for copying a file from repo to workspace
+ */
+export interface CopyFileConfig {
+  /** Source path relative to repo */
+  src: string;
+  /** Destination path relative to workspace root */
+  dest: string;
+}
+
+/**
+ * Configuration for creating a symlink from repo to workspace
+ */
+export interface LinkFileConfig {
+  /** Source path relative to repo */
+  src: string;
+  /** Destination path relative to workspace root */
+  dest: string;
+}
+
+/**
  * Configuration for a single repository in the manifest
  */
 export interface RepoConfig {
@@ -8,6 +28,10 @@ export interface RepoConfig {
   path: string;
   /** Default branch name (e.g., main, master) */
   default_branch: string;
+  /** Files to copy from repo to workspace */
+  copyfile?: CopyFileConfig[];
+  /** Symlinks to create from repo to workspace */
+  linkfile?: LinkFileConfig[];
 }
 
 /**
@@ -16,6 +40,10 @@ export interface RepoConfig {
 export interface ManifestRepoConfig {
   /** Git URL for the manifest repository */
   url: string;
+  /** Files to copy from manifest repo to workspace */
+  copyfile?: CopyFileConfig[];
+  /** Symlinks to create from manifest repo to workspace */
+  linkfile?: LinkFileConfig[];
 }
 
 /**
@@ -29,6 +57,64 @@ export interface ManifestSettings {
 }
 
 /**
+ * A step in a multi-step script
+ */
+export interface ScriptStep {
+  /** Step name for display */
+  name: string;
+  /** Command to execute */
+  command: string;
+  /** Working directory relative to workspace root */
+  cwd?: string;
+}
+
+/**
+ * A workspace script definition
+ */
+export interface WorkspaceScript {
+  /** Description of what the script does */
+  description?: string;
+  /** Single command to run (mutually exclusive with steps) */
+  command?: string;
+  /** Working directory for single command */
+  cwd?: string;
+  /** Multi-step commands (mutually exclusive with command) */
+  steps?: ScriptStep[];
+}
+
+/**
+ * A hook command to run
+ */
+export interface HookCommand {
+  /** Command to execute */
+  command: string;
+  /** Working directory relative to workspace root */
+  cwd?: string;
+}
+
+/**
+ * Workspace hooks configuration
+ */
+export interface WorkspaceHooks {
+  /** Hooks to run after sync */
+  'post-sync'?: HookCommand[];
+  /** Hooks to run after checkout */
+  'post-checkout'?: HookCommand[];
+}
+
+/**
+ * Workspace configuration section
+ */
+export interface WorkspaceConfig {
+  /** Environment variables to set */
+  env?: Record<string, string>;
+  /** Named scripts */
+  scripts?: Record<string, WorkspaceScript>;
+  /** Lifecycle hooks */
+  hooks?: WorkspaceHooks;
+}
+
+/**
  * The full manifest file structure (codi-repos.yaml)
  */
 export interface Manifest {
@@ -37,6 +123,8 @@ export interface Manifest {
   manifest?: ManifestRepoConfig;
   repos: Record<string, RepoConfig>;
   settings: ManifestSettings;
+  /** Workspace configuration for scripts, hooks, and env */
+  workspace?: WorkspaceConfig;
 }
 
 /**
@@ -179,4 +267,22 @@ export interface PRMergeOptions {
 export interface GitHubRepoInfo {
   owner: string;
   repo: string;
+}
+
+/**
+ * Status of a file link (copyfile or linkfile)
+ */
+export interface LinkStatus {
+  /** Type of link */
+  type: 'copyfile' | 'linkfile';
+  /** Repository name */
+  repoName: string;
+  /** Source path (absolute) */
+  src: string;
+  /** Destination path (absolute) */
+  dest: string;
+  /** Status of the link */
+  status: 'valid' | 'broken' | 'missing' | 'conflict';
+  /** Additional message */
+  message?: string;
 }

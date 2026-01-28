@@ -2,11 +2,15 @@ import chalk from 'chalk';
 import ora from 'ora';
 import { loadManifest, getAllRepoInfo, getManifestsDir } from '../lib/manifest.js';
 import { pullLatest, fetchRemote, pathExists, getCurrentBranch, getRemoteUrl, setRemoteUrl, setUpstreamBranch } from '../lib/git.js';
+import { processAllLinks } from '../lib/files.js';
+import { runHooks } from '../lib/hooks.js';
 import type { RepoInfo } from '../types.js';
 
 interface SyncOptions {
   fetch?: boolean;
   all?: boolean;
+  noLink?: boolean;
+  noHooks?: boolean;
 }
 
 /**
@@ -109,5 +113,74 @@ export async function sync(options: SyncOptions = {}): Promise<void> {
     console.log(
       chalk.yellow(`Synced ${succeeded}/${repos.length} repositories. ${failed} had issues.`)
     );
+  }
+
+  // Process links unless disabled
+  if (!options.noLink) {
+    const hasRepoLinks = Object.values(updatedManifest.repos).some(
+      (repo) => (repo.copyfile && repo.copyfile.length > 0) || (repo.linkfile && repo.linkfile.length > 0)
+    );
+    const hasManifestLinks = updatedManifest.manifest && (
+      (updatedManifest.manifest.copyfile && updatedManifest.manifest.copyfile.length > 0) ||
+      (updatedManifest.manifest.linkfile && updatedManifest.manifest.linkfile.length > 0)
+    );
+
+    if (hasRepoLinks || hasManifestLinks) {
+      console.log('');
+      const linkSpinner = ora('Processing links...').start();
+      try {
+        const linkResults = await processAllLinks(updatedManifest, rootDir, { force: false }, manifestsDir);
+        const totalLinks = linkResults.reduce(
+          (sum, r) => sum + r.copyfiles.length + r.linkfiles.length,
+          0
+        );
+        const successfulLinks = linkResults.reduce(
+          (sum, r) =>
+            sum +
+            r.copyfiles.filter((c) => c.success).length +
+            r.linkfiles.filter((l) => l.success).length,
+          0
+        );
+
+        if (successfulLinks === totalLinks) {
+          linkSpinner.succeed(`Processed ${totalLinks} link(s)`);
+        } else {
+          linkSpinner.warn(`Processed ${successfulLinks}/${totalLinks} link(s), some failed`);
+        }
+      } catch (error) {
+        linkSpinner.fail(`Failed to process links: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
+  }
+
+  // Run post-sync hooks unless disabled
+  if (!options.noHooks) {
+    const postSyncHooks = updatedManifest.workspace?.hooks?.['post-sync'];
+    if (postSyncHooks && postSyncHooks.length > 0) {
+      console.log('');
+      console.log(chalk.blue('Running post-sync hooks...\n'));
+
+      const hookResults = await runHooks(postSyncHooks, rootDir, updatedManifest.workspace?.env);
+
+      for (const result of hookResults) {
+        if (result.success) {
+          console.log(chalk.green(`  \u2713 ${result.command}`));
+        } else {
+          console.log(chalk.red(`  \u2717 ${result.command}`));
+          if (result.stderr) {
+            console.log(chalk.dim(`    ${result.stderr.trim()}`));
+          }
+          if (result.error) {
+            console.log(chalk.dim(`    Error: ${result.error}`));
+          }
+        }
+      }
+
+      const hooksFailed = hookResults.some((r) => !r.success);
+      if (hooksFailed) {
+        console.log('');
+        console.log(chalk.yellow('Some post-sync hooks failed.'));
+      }
+    }
   }
 }

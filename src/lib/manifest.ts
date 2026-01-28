@@ -1,7 +1,7 @@
 import { readFile, writeFile, access } from 'fs/promises';
-import { resolve, dirname, join } from 'path';
+import { resolve, dirname, join, normalize } from 'path';
 import YAML from 'yaml';
-import type { Manifest, RepoInfo, StateFile, GitHubRepoInfo } from '../types.js';
+import type { Manifest, RepoInfo, StateFile, GitHubRepoInfo, CopyFileConfig, LinkFileConfig, WorkspaceScript } from '../types.js';
 
 // AOSP-style: manifest lives in .codi-repo/manifests/manifest.yaml
 const CODI_REPO_DIR = '.codi-repo';
@@ -19,6 +19,63 @@ const DEFAULT_SETTINGS = {
   pr_prefix: '[cross-repo]',
   merge_strategy: 'all-or-nothing' as const,
 };
+
+/**
+ * Check if a relative path would escape its parent directory
+ */
+function pathEscapesBoundary(relativePath: string): boolean {
+  const normalized = normalize(relativePath);
+  // Check for path traversal attempts
+  if (normalized.startsWith('..') || normalized.startsWith('/') || normalized.includes('/../')) {
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Validate copyfile/linkfile config
+ */
+function validateFileConfig(
+  config: CopyFileConfig | LinkFileConfig,
+  type: 'copyfile' | 'linkfile',
+  repoName: string
+): void {
+  if (!config.src || typeof config.src !== 'string') {
+    throw new Error(`${type} in repo '${repoName}' is missing 'src'`);
+  }
+  if (!config.dest || typeof config.dest !== 'string') {
+    throw new Error(`${type} in repo '${repoName}' is missing 'dest'`);
+  }
+  if (pathEscapesBoundary(config.src)) {
+    throw new Error(`${type} in repo '${repoName}': src path '${config.src}' escapes repo boundary`);
+  }
+  if (pathEscapesBoundary(config.dest)) {
+    throw new Error(`${type} in repo '${repoName}': dest path '${config.dest}' escapes workspace boundary`);
+  }
+}
+
+/**
+ * Validate workspace script config
+ */
+function validateScript(script: WorkspaceScript, scriptName: string): void {
+  if (!script.command && !script.steps) {
+    throw new Error(`Script '${scriptName}' must have either 'command' or 'steps'`);
+  }
+  if (script.command && script.steps) {
+    throw new Error(`Script '${scriptName}' cannot have both 'command' and 'steps'`);
+  }
+  if (script.steps) {
+    for (let i = 0; i < script.steps.length; i++) {
+      const step = script.steps[i];
+      if (!step.name) {
+        throw new Error(`Script '${scriptName}' step ${i + 1} is missing 'name'`);
+      }
+      if (!step.command) {
+        throw new Error(`Script '${scriptName}' step '${step.name}' is missing 'command'`);
+      }
+    }
+  }
+}
 
 /**
  * Get the path to the manifests directory
@@ -116,6 +173,83 @@ export async function loadManifest(manifestPath?: string): Promise<{ manifest: M
     }
     if (!repo.default_branch) {
       repo.default_branch = 'main';
+    }
+
+    // Validate copyfile entries
+    if (repo.copyfile) {
+      if (!Array.isArray(repo.copyfile)) {
+        throw new Error(`Repository '${name}': copyfile must be an array`);
+      }
+      for (const config of repo.copyfile) {
+        validateFileConfig(config, 'copyfile', name);
+      }
+    }
+
+    // Validate linkfile entries
+    if (repo.linkfile) {
+      if (!Array.isArray(repo.linkfile)) {
+        throw new Error(`Repository '${name}': linkfile must be an array`);
+      }
+      for (const config of repo.linkfile) {
+        validateFileConfig(config, 'linkfile', name);
+      }
+    }
+  }
+
+  // Validate manifest-level copyfile/linkfile entries
+  if (parsed.manifest) {
+    if (parsed.manifest.copyfile) {
+      if (!Array.isArray(parsed.manifest.copyfile)) {
+        throw new Error('manifest.copyfile must be an array');
+      }
+      for (const config of parsed.manifest.copyfile) {
+        validateFileConfig(config, 'copyfile', 'manifest');
+      }
+    }
+    if (parsed.manifest.linkfile) {
+      if (!Array.isArray(parsed.manifest.linkfile)) {
+        throw new Error('manifest.linkfile must be an array');
+      }
+      for (const config of parsed.manifest.linkfile) {
+        validateFileConfig(config, 'linkfile', 'manifest');
+      }
+    }
+  }
+
+  // Validate workspace config
+  if (parsed.workspace) {
+    // Validate env
+    if (parsed.workspace.env) {
+      if (typeof parsed.workspace.env !== 'object') {
+        throw new Error('workspace.env must be an object');
+      }
+    }
+
+    // Validate scripts
+    if (parsed.workspace.scripts) {
+      if (typeof parsed.workspace.scripts !== 'object') {
+        throw new Error('workspace.scripts must be an object');
+      }
+      for (const [scriptName, script] of Object.entries(parsed.workspace.scripts)) {
+        validateScript(script, scriptName);
+      }
+    }
+
+    // Validate hooks
+    if (parsed.workspace.hooks) {
+      if (typeof parsed.workspace.hooks !== 'object') {
+        throw new Error('workspace.hooks must be an object');
+      }
+      const validHooks = ['post-sync', 'post-checkout'];
+      for (const hookName of Object.keys(parsed.workspace.hooks)) {
+        if (!validHooks.includes(hookName)) {
+          throw new Error(`Unknown hook '${hookName}'. Valid hooks: ${validHooks.join(', ')}`);
+        }
+        const hooks = parsed.workspace.hooks[hookName as keyof typeof parsed.workspace.hooks];
+        if (hooks && !Array.isArray(hooks)) {
+          throw new Error(`workspace.hooks.${hookName} must be an array`);
+        }
+      }
     }
   }
 

@@ -9,6 +9,9 @@ import { status } from './commands/status.js';
 import { branch, listBranches } from './commands/branch.js';
 import { checkout } from './commands/checkout.js';
 import { createPR, prStatus, mergePRs } from './commands/pr/index.js';
+import { link } from './commands/link.js';
+import { run } from './commands/run.js';
+import { env } from './commands/env.js';
 
 const program = new Command();
 
@@ -50,9 +53,15 @@ program
   .command('sync')
   .description('Pull latest changes from manifest and all repositories')
   .option('--fetch', 'Fetch only (do not merge)')
+  .option('--no-link', 'Skip processing copyfile/linkfile entries')
+  .option('--no-hooks', 'Skip running post-sync hooks')
   .action(async (options) => {
     try {
-      await sync(options);
+      await sync({
+        fetch: options.fetch,
+        noLink: !options.link,
+        noHooks: !options.hooks,
+      });
     } catch (error) {
       console.error(chalk.red(error instanceof Error ? error.message : String(error)));
       process.exit(1);
@@ -96,9 +105,58 @@ program
   .command('checkout <branch>')
   .description('Checkout a branch across all repositories')
   .option('-b', 'Create the branch if it does not exist')
+  .option('--no-hooks', 'Skip running post-checkout hooks')
   .action(async (branchName, options) => {
     try {
-      await checkout(branchName, { create: options.b });
+      await checkout(branchName, { create: options.b, noHooks: !options.hooks });
+    } catch (error) {
+      console.error(chalk.red(error instanceof Error ? error.message : String(error)));
+      process.exit(1);
+    }
+  });
+
+// Link command
+program
+  .command('link')
+  .description('Create/update copyfile and linkfile entries')
+  .option('--status', 'Show link status (valid, broken, missing)')
+  .option('--clean', 'Remove orphaned links')
+  .option('--force', 'Overwrite existing files/links')
+  .option('--dry-run', 'Preview changes without executing')
+  .action(async (options) => {
+    try {
+      await link(options);
+    } catch (error) {
+      console.error(chalk.red(error instanceof Error ? error.message : String(error)));
+      process.exit(1);
+    }
+  });
+
+// Run command
+program
+  .command('run [script]')
+  .description('Run a workspace script')
+  .option('--list', 'List available scripts')
+  .allowUnknownOption(true)
+  .action(async (scriptName, options, command) => {
+    try {
+      // Get remaining args after "--"
+      const args = command.args.slice(1);
+      await run(scriptName, args, { list: options.list });
+    } catch (error) {
+      console.error(chalk.red(error instanceof Error ? error.message : String(error)));
+      process.exit(1);
+    }
+  });
+
+// Env command
+program
+  .command('env')
+  .description('Show workspace environment variables')
+  .option('--json', 'Output as JSON')
+  .action(async (options) => {
+    try {
+      await env(options);
     } catch (error) {
       console.error(chalk.red(error instanceof Error ? error.message : String(error)));
       process.exit(1);

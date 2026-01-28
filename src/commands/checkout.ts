@@ -2,10 +2,12 @@ import chalk from 'chalk';
 import ora from 'ora';
 import { loadManifest, getAllRepoInfo } from '../lib/manifest.js';
 import { checkoutBranchInAllRepos, pathExists, branchExists } from '../lib/git.js';
+import { runHooks } from '../lib/hooks.js';
 import type { RepoInfo } from '../types.js';
 
 interface CheckoutOptions {
   create?: boolean;
+  noHooks?: boolean;
 }
 
 /**
@@ -74,4 +76,35 @@ export async function checkout(branchName: string, options: CheckoutOptions = {}
   const succeeded = results.filter((r) => r.success).length;
   console.log('');
   console.log(chalk.dim(`Switched ${succeeded}/${clonedRepos.length} repos to ${branchName}`));
+
+  // Run post-checkout hooks unless disabled
+  if (!options.noHooks) {
+    const postCheckoutHooks = manifest.workspace?.hooks?.['post-checkout'];
+    if (postCheckoutHooks && postCheckoutHooks.length > 0) {
+      console.log('');
+      console.log(chalk.blue('Running post-checkout hooks...\n'));
+
+      const hookResults = await runHooks(postCheckoutHooks, rootDir, manifest.workspace?.env);
+
+      for (const result of hookResults) {
+        if (result.success) {
+          console.log(chalk.green(`  \u2713 ${result.command}`));
+        } else {
+          console.log(chalk.red(`  \u2717 ${result.command}`));
+          if (result.stderr) {
+            console.log(chalk.dim(`    ${result.stderr.trim()}`));
+          }
+          if (result.error) {
+            console.log(chalk.dim(`    Error: ${result.error}`));
+          }
+        }
+      }
+
+      const hooksFailed = hookResults.some((r) => !r.success);
+      if (hooksFailed) {
+        console.log('');
+        console.log(chalk.yellow('Some post-checkout hooks failed.'));
+      }
+    }
+  }
 }
