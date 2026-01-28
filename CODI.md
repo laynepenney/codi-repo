@@ -233,3 +233,12 @@ codi-repo is self-improving. When using `cr` commands, capture any friction or i
 1. Add observations to IMPROVEMENTS.md under "Pending Review"
 2. Prompt the user: "I added [observation] to IMPROVEMENTS.md. Want me to create an issue?"
 3. Only create issues after user approval
+
+### CRITICAL: Document When Falling Back to Raw Commands
+
+**If you ever use raw `git` or `gh` commands, you MUST immediately:**
+
+1. Add an entry to `IMPROVEMENTS.md` explaining why `cr` couldn't handle the use case
+2. Tell the user about the friction point
+
+This is mandatory. Every workaround reveals a gap in `cr` that should be fixed.

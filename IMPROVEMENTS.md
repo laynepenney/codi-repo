@@ -7,7 +7,10 @@ Items here should be reviewed before creating GitHub issues.
 
 ## Pending Review
 
-_No items pending review._
+#### `cr pr create` should work when repos are on different branches
+- **Problem**: `cr pr create` fails with "Repositories are on different branches" even when only a subset of repos have changes. This forces fallback to raw `gh` commands.
+- **Example**: When only `tooling` and `manifest` have changes but `public/private/strategy` are on `main`, `cr pr create` refuses to run.
+- **Proposal**: Only check branch consistency for repos that actually have commits ahead. Repos on `main` with no changes shouldn't block PR creation for repos that do have changes.
 
 ---
 

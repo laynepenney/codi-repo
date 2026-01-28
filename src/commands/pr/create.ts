@@ -47,20 +47,50 @@ export async function createPR(options: CreateOptions = {}): Promise<void> {
     return;
   }
 
-  // Get current branch
-  const branches = await Promise.all(
-    clonedRepos.map(async (repo) => ({
-      repo,
-      branch: await getCurrentBranch(repo.absolutePath),
-    }))
+  // Get current branch and check for changes in each repo
+  const repoStatus = await Promise.all(
+    clonedRepos.map(async (repo) => {
+      const branch = await getCurrentBranch(repo.absolutePath);
+      const hasChanges = await hasCommitsAhead(repo.absolutePath, repo.default_branch);
+      const needsPush = hasChanges && !(await remoteBranchExists(repo.absolutePath, branch));
+      return { repo, branch, hasChanges, needsPush };
+    })
   );
 
-  // Check all repos are on the same branch
-  const uniqueBranches = [...new Set(branches.map((b) => b.branch))];
+  // Check manifest for changes too
+  const manifestInfo = getManifestRepoInfo(manifest, rootDir);
+  let manifestBranch: string | null = null;
+  let manifestHasChanges = false;
+  let manifestNeedsPush = false;
+  if (manifestInfo && await isGitRepo(manifestInfo.absolutePath)) {
+    manifestBranch = await getCurrentBranch(manifestInfo.absolutePath);
+    manifestHasChanges = await hasCommitsAhead(manifestInfo.absolutePath, manifestInfo.default_branch);
+    manifestNeedsPush = manifestHasChanges && !(await remoteBranchExists(manifestInfo.absolutePath, manifestBranch));
+  }
+
+  // Filter to repos with changes
+  const withChanges = repoStatus.filter((r) => r.hasChanges);
+
+  if (withChanges.length === 0 && !manifestHasChanges) {
+    console.log(chalk.yellow('No repositories have commits ahead of their default branch.'));
+    console.log(chalk.dim('Make some commits first, then run this command again.'));
+    return;
+  }
+
+  // Only check branch consistency for repos WITH CHANGES (not all repos)
+  const branchesWithChanges = withChanges.map((r) => r.branch);
+  if (manifestHasChanges && manifestBranch) {
+    branchesWithChanges.push(manifestBranch);
+  }
+  const uniqueBranches = [...new Set(branchesWithChanges)];
+
   if (uniqueBranches.length > 1) {
-    console.log(chalk.yellow('Repositories are on different branches:'));
-    for (const { repo, branch } of branches) {
+    console.log(chalk.yellow('Repositories with changes are on different branches:'));
+    for (const { repo, branch } of withChanges) {
       console.log(`  ${repo.name}: ${chalk.cyan(branch)}`);
+    }
+    if (manifestHasChanges && manifestInfo && manifestBranch) {
+      console.log(`  ${manifestInfo.name}: ${chalk.cyan(manifestBranch)}`);
     }
     console.log('');
     console.log(chalk.dim('Use `codi-repo checkout <branch>` to sync branches first.'));
@@ -70,7 +100,7 @@ export async function createPR(options: CreateOptions = {}): Promise<void> {
   const branchName = uniqueBranches[0];
 
   // Check it's not the default branch
-  const onDefaultBranch = clonedRepos.some((repo) => repo.default_branch === branchName);
+  const onDefaultBranch = withChanges.some((r) => r.repo.default_branch === branchName);
   if (onDefaultBranch) {
     console.log(chalk.yellow(`You're on the default branch (${branchName}).`));
     console.log(chalk.dim('Create a feature branch first with `codi-repo branch <name>`.'));
@@ -78,38 +108,6 @@ export async function createPR(options: CreateOptions = {}): Promise<void> {
   }
 
   console.log(chalk.blue(`Creating PRs for branch: ${chalk.cyan(branchName)}\n`));
-
-  // Check which repos have commits to push
-  const reposWithChanges: { repo: RepoInfo; hasChanges: boolean; needsPush: boolean }[] =
-    await Promise.all(
-      clonedRepos.map(async (repo) => {
-        const hasChanges = await hasCommitsAhead(repo.absolutePath, repo.default_branch);
-        const needsPush = hasChanges && !(await remoteBranchExists(repo.absolutePath, branchName));
-        return { repo, hasChanges, needsPush };
-      })
-    );
-
-  // Check manifest for changes too
-  const manifestInfo = getManifestRepoInfo(manifest, rootDir);
-  let manifestHasChanges = false;
-  let manifestNeedsPush = false;
-  let manifestOnSameBranch = false;
-  if (manifestInfo && await isGitRepo(manifestInfo.absolutePath)) {
-    const manifestBranch = await getCurrentBranch(manifestInfo.absolutePath);
-    manifestOnSameBranch = manifestBranch === branchName;
-    if (manifestOnSameBranch) {
-      manifestHasChanges = await hasCommitsAhead(manifestInfo.absolutePath, manifestInfo.default_branch);
-      manifestNeedsPush = manifestHasChanges && !(await remoteBranchExists(manifestInfo.absolutePath, branchName));
-    }
-  }
-
-  const withChanges = reposWithChanges.filter((r) => r.hasChanges);
-
-  if (withChanges.length === 0 && !manifestHasChanges) {
-    console.log(chalk.yellow('No repositories have commits ahead of their default branch.'));
-    console.log(chalk.dim('Make some commits first, then run this command again.'));
-    return;
-  }
 
   const totalChanges = withChanges.length + (manifestHasChanges ? 1 : 0);
   console.log(`Found changes in ${totalChanges} repos:`);
@@ -122,7 +120,7 @@ export async function createPR(options: CreateOptions = {}): Promise<void> {
   console.log('');
 
   // Check if any need to be pushed first (including manifest)
-  const needsPush = reposWithChanges.filter((r) => r.needsPush);
+  const needsPush = withChanges.filter((r) => r.needsPush);
   const allNeedsPush: { repo: RepoInfo; needsPush: boolean }[] = [...needsPush];
   if (manifestNeedsPush && manifestInfo) {
     allNeedsPush.push({ repo: manifestInfo, needsPush: true });

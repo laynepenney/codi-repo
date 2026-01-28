@@ -125,6 +125,7 @@ cr bench manifest-load -n 10 # Run specific benchmark
 4. **Always use pull requests** - `cr pr create`, never push directly to main
 5. **Check `cr status` frequently** - Before and after operations
 6. **`cr` handles the manifest repo automatically** - No need for separate git operations in `.codi-repo/manifests/`
+7. **If you MUST use raw `git`/`gh`** - Immediately add to `codi-repo/IMPROVEMENTS.md` explaining why `cr` couldn't handle it
 
 ## Typical Workflow
 
