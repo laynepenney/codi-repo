@@ -336,3 +336,86 @@ export async function setUpstreamBranch(repoPath: string, remote = 'origin'): Pr
   const branch = await getCurrentBranch(repoPath);
   await git.branch(['--set-upstream-to', `${remote}/${branch}`, branch]);
 }
+
+/**
+ * Get the upstream tracking branch for a local branch
+ * Returns null if no upstream is configured
+ */
+export async function getUpstreamBranch(repoPath: string, branch?: string): Promise<string | null> {
+  const git = getGitInstance(repoPath);
+  const localBranch = branch ?? (await getCurrentBranch(repoPath));
+  try {
+    const result = await git.raw(['config', '--get', `branch.${localBranch}.merge`]);
+    // Result is like "refs/heads/feature-branch"
+    const ref = result.trim();
+    if (ref.startsWith('refs/heads/')) {
+      return ref.replace('refs/heads/', '');
+    }
+    return ref || null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Check if the upstream branch for current branch still exists on remote
+ */
+export async function upstreamBranchExists(repoPath: string, remote = 'origin'): Promise<boolean> {
+  const upstreamBranch = await getUpstreamBranch(repoPath);
+  if (!upstreamBranch) {
+    return false;
+  }
+  return remoteBranchExists(repoPath, upstreamBranch, remote);
+}
+
+/**
+ * Safely pull latest, handling the case where upstream branch was deleted
+ * Returns true if pull succeeded, false if had to recover (checkout default branch)
+ */
+export async function safePullLatest(
+  repoPath: string,
+  defaultBranch = 'main',
+  remote = 'origin'
+): Promise<{ pulled: boolean; recovered: boolean; message?: string }> {
+  const git = getGitInstance(repoPath);
+  const currentBranch = await getCurrentBranch(repoPath);
+
+  // If we're on the default branch, just pull
+  if (currentBranch === defaultBranch) {
+    try {
+      await git.pull(remote);
+      return { pulled: true, recovered: false };
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : String(error);
+      return { pulled: false, recovered: false, message: errorMsg };
+    }
+  }
+
+  // Check if upstream branch still exists
+  const upstreamExists = await upstreamBranchExists(repoPath, remote);
+
+  if (!upstreamExists) {
+    // Upstream was deleted (likely after PR merge), recover by checking out default branch
+    try {
+      await git.checkout(defaultBranch);
+      await git.pull(remote);
+      return {
+        pulled: true,
+        recovered: true,
+        message: `Switched from '${currentBranch}' to '${defaultBranch}' (upstream branch was deleted)`
+      };
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : String(error);
+      return { pulled: false, recovered: false, message: errorMsg };
+    }
+  }
+
+  // Upstream exists, normal pull
+  try {
+    await git.pull(remote);
+    return { pulled: true, recovered: false };
+  } catch (error) {
+    const errorMsg = error instanceof Error ? error.message : String(error);
+    return { pulled: false, recovered: false, message: errorMsg };
+  }
+}
