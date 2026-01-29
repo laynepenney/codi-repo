@@ -9,7 +9,15 @@ Items here should be reviewed before creating GitHub issues.
 
 ## Pending Review
 
-_No items pending review._
+### Missing: `gr commit --amend` support
+
+**Discovered**: 2026-01-29 during sync fix + repo add implementation
+
+**Problem**: Needed to amend a commit after review found minor issues (unused import, misleading comment). Had to use `git commit --amend --no-edit` directly.
+
+**Workaround**: `gr add <files> && git commit --amend --no-edit`
+
+**Suggested**: Add `--amend` flag to `gr commit`
 
 ---
 
