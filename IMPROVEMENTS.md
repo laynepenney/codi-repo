@@ -7,6 +7,33 @@ Items here should be reviewed before creating GitHub issues.
 
 ---
 
+### PR Creation Timeout Issue
+
+**Discovered**: 2025-12-05 during codi.md documentation PR
+
+**Problem**: `gr pr create` consistently times out (~30s) even when:
+- `gh auth status` shows authenticated user with `repo` scope
+- Git operations work (push, status, diff)
+- Other `gr` commands work normally
+
+**Reproduction**:
+```bash
+gr pr create -t "title" --push    # times out
+gr pr create -t "title"           # times out
+```
+
+**Workaround**:
+```bash
+cd codi && gh pr create --title "docs: clarify codi/codi-private setup" --body "..." --base main
+```
+
+**Potential causes**:
+- Browser-based auth flow required
+- Token refresh issue in this environment  
+- Missing `--body` flag causing interactive prompt
+
+---
+
 ## Pending Review
 
 ### Missing: Single-repo branch creation from existing commit
