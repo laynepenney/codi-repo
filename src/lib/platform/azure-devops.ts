@@ -494,7 +494,8 @@ export class AzureDevOpsPlatform implements HostingPlatform {
     // Check custom base URL
     if (this.config.baseUrl && this.config.baseUrl !== 'https://dev.azure.com') {
       const host = new URL(this.config.baseUrl).host;
-      const customRegex = new RegExp(`https?://${host.replace('.', '\\.')}/([^/]+)/([^/]+)/_git/(.+?)(?:\\.git)?$`);
+      const escapedHost = host.replace(/\./g, '\\.');
+      const customRegex = new RegExp(`https?://${escapedHost}/([^/]+)/([^/]+)/_git/(.+?)(?:\\.git)?$`);
       const customMatch = url.match(customRegex);
       if (customMatch) {
         return {
@@ -516,8 +517,8 @@ export class AzureDevOpsPlatform implements HostingPlatform {
     if (url.includes('visualstudio.com')) return true;
     if (url.includes('ssh.dev.azure.com')) return true;
 
-    // Check against configured base URL
-    if (this.config.baseUrl) {
+    // Check against configured base URL (for Azure DevOps Server)
+    if (this.config.baseUrl && this.config.baseUrl !== 'https://dev.azure.com') {
       const host = new URL(this.config.baseUrl).host;
       if (url.includes(host)) return true;
     }

@@ -25,23 +25,29 @@ const platformCache = new Map<string, HostingPlatform>();
  * @returns The detected platform type, or null if unknown
  */
 export function detectPlatform(url: string): PlatformType | null {
-  // GitHub detection
+  // GitHub detection (most common, check first)
   if (url.includes('github.com')) {
     return 'github';
   }
 
-  // GitLab detection
-  if (url.includes('gitlab.com') || url.includes('gitlab')) {
-    return 'gitlab';
-  }
-
-  // Azure DevOps detection
+  // Azure DevOps detection (check before GitLab to avoid false positives)
   if (
     url.includes('dev.azure.com') ||
     url.includes('visualstudio.com') ||
     url.includes('ssh.dev.azure.com')
   ) {
     return 'azure-devops';
+  }
+
+  // GitLab detection - check for gitlab.com or gitlab in hostname (not in path)
+  // This avoids false positives like "git@myserver.com:my-gitlab-clone/repo.git"
+  if (url.includes('gitlab.com')) {
+    return 'gitlab';
+  }
+  // Match URLs where "gitlab" appears in the hostname portion
+  // e.g., git@gitlab.company.com: or https://gitlab.company.com/
+  if (/(?:@|:\/\/)gitlab\./i.test(url)) {
+    return 'gitlab';
   }
 
   return null;

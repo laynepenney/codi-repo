@@ -1,6 +1,5 @@
-import type { LinkedPR, ManifestPR, RepoInfo, PlatformType } from '../types.js';
+import type { LinkedPR, ManifestPR, RepoInfo } from '../types.js';
 import { getPlatformAdapter } from './platform/index.js';
-import type { HostingPlatform } from './platform/types.js';
 import { loadState, saveState, getAllRepoInfo } from './manifest.js';
 import type { Manifest } from '../types.js';
 

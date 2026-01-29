@@ -384,9 +384,10 @@ export class GitLabPlatform implements HostingPlatform {
   parseRepoUrl(url: string): ParsedRepoInfo | null {
     // Extract hostname from baseUrl for matching
     const baseHost = new URL(this.baseUrl).host;
+    const escapedHost = baseHost.replace(/\./g, '\\.');
 
     // SSH format: git@gitlab.com:owner/repo.git or git@gitlab.com:group/subgroup/repo.git
-    const sshRegex = new RegExp(`git@${baseHost.replace('.', '\\.')}:(.+?)(?:\\.git)?$`);
+    const sshRegex = new RegExp(`git@${escapedHost}:(.+?)(?:\\.git)?$`);
     const sshMatch = url.match(sshRegex);
     if (sshMatch) {
       const path = sshMatch[1];
@@ -398,7 +399,7 @@ export class GitLabPlatform implements HostingPlatform {
     }
 
     // HTTPS format: https://gitlab.com/owner/repo.git
-    const httpsRegex = new RegExp(`https?://${baseHost.replace('.', '\\.')}/(.+?)(?:\\.git)?$`);
+    const httpsRegex = new RegExp(`https?://${escapedHost}/(.+?)(?:\\.git)?$`);
     const httpsMatch = url.match(httpsRegex);
     if (httpsMatch) {
       const path = httpsMatch[1];
@@ -436,15 +437,18 @@ export class GitLabPlatform implements HostingPlatform {
    * Check if URL matches GitLab
    */
   matchesUrl(url: string): boolean {
-    // Check for gitlab.com or custom GitLab instances
+    // Check for gitlab.com (specific match)
     if (url.includes('gitlab.com')) return true;
-    if (url.includes('gitlab')) return true;
 
     // Check against configured base URL
     if (this.config.baseUrl) {
       const host = new URL(this.config.baseUrl).host;
       if (url.includes(host)) return true;
     }
+
+    // Check if URL appears to be GitLab (contains gitlab in the hostname, not path)
+    // Match patterns like git@gitlab.company.com or https://gitlab.company.com
+    if (/(?:@|:\/\/)gitlab\./i.test(url)) return true;
 
     return false;
   }

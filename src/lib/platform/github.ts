@@ -294,14 +294,15 @@ export class GitHubPlatform implements HostingPlatform {
     // GitHub Enterprise SSH: git@github.company.com:owner/repo.git
     if (this.config.baseUrl) {
       const host = new URL(this.config.baseUrl).host;
-      const enterpriseSshRegex = new RegExp(`git@${host.replace('.', '\\.')}:([^/]+)/(.+?)(?:\\.git)?$`);
+      const escapedHost = host.replace(/\./g, '\\.');
+      const enterpriseSshRegex = new RegExp(`git@${escapedHost}:([^/]+)/(.+?)(?:\\.git)?$`);
       const enterpriseSshMatch = url.match(enterpriseSshRegex);
       if (enterpriseSshMatch) {
         return { owner: enterpriseSshMatch[1], repo: enterpriseSshMatch[2] };
       }
 
       // GitHub Enterprise HTTPS
-      const enterpriseHttpsRegex = new RegExp(`https?://${host.replace('.', '\\.')}/([^/]+)/(.+?)(?:\\.git)?$`);
+      const enterpriseHttpsRegex = new RegExp(`https?://${escapedHost}/([^/]+)/(.+?)(?:\\.git)?$`);
       const enterpriseHttpsMatch = url.match(enterpriseHttpsRegex);
       if (enterpriseHttpsMatch) {
         return { owner: enterpriseHttpsMatch[1], repo: enterpriseHttpsMatch[2] };
@@ -343,17 +344,21 @@ export class GitHubPlatform implements HostingPlatform {
   }
 }
 
-// Singleton instance for backward compatibility
-let defaultInstance: GitHubPlatform | null = null;
+// Default instance cache (keyed by baseUrl for proper config handling)
+const instanceCache = new Map<string, GitHubPlatform>();
 
 /**
- * Get the default GitHub platform instance
+ * Get a GitHub platform instance (cached by config)
+ * @deprecated Use getPlatformAdapter('github', config) from platform/index.ts instead
  */
 export function getGitHubPlatform(config?: PlatformConfig): GitHubPlatform {
-  if (!defaultInstance) {
-    defaultInstance = new GitHubPlatform(config);
+  const cacheKey = config?.baseUrl ?? 'default';
+  let instance = instanceCache.get(cacheKey);
+  if (!instance) {
+    instance = new GitHubPlatform(config);
+    instanceCache.set(cacheKey, instance);
   }
-  return defaultInstance;
+  return instance;
 }
 
 /**
