@@ -18,6 +18,7 @@ import { add } from './commands/add.js';
 import { diff } from './commands/diff.js';
 import { forall } from './commands/forall.js';
 import { repoAdd } from './commands/repo.js';
+import { griptreeAdd, griptreeList, griptreeRemove, griptreeLock, griptreeUnlock } from './commands/griptree.js';
 import { TimingContext, formatTimingReport, setTimingContext, getTimingContext } from './lib/timing.js';
 
 const program = new Command();
@@ -355,6 +356,66 @@ repo.command('add <url>')
         branch: options.branch,
         noClone: !options.clone,
       });
+    } catch (error) {
+      console.error(chalk.red(error instanceof Error ? error.message : String(error)));
+      process.exit(1);
+    }
+  });
+
+// Griptree commands - worktree-based multi-branch workspaces
+const griptree = program.command('griptree').description('Manage griptrees (worktree-based multi-branch workspaces)');
+
+griptree.command('add <branch>')
+  .description('Create a griptree for a branch')
+  .option('-p, --path <path>', 'Custom path for the griptree directory')
+  .action(async (branch, options) => {
+    try {
+      await griptreeAdd(branch, { path: options.path });
+    } catch (error) {
+      console.error(chalk.red(error instanceof Error ? error.message : String(error)));
+      process.exit(1);
+    }
+  });
+
+griptree.command('list')
+  .description('List all griptrees')
+  .action(async () => {
+    try {
+      await griptreeList();
+    } catch (error) {
+      console.error(chalk.red(error instanceof Error ? error.message : String(error)));
+      process.exit(1);
+    }
+  });
+
+griptree.command('remove <branch>')
+  .description('Remove a griptree')
+  .option('-f, --force', 'Force removal even if locked')
+  .action(async (branch, options) => {
+    try {
+      await griptreeRemove(branch, { force: options.force });
+    } catch (error) {
+      console.error(chalk.red(error instanceof Error ? error.message : String(error)));
+      process.exit(1);
+    }
+  });
+
+griptree.command('lock <branch>')
+  .description('Lock a griptree to prevent accidental removal')
+  .action(async (branch) => {
+    try {
+      await griptreeLock(branch);
+    } catch (error) {
+      console.error(chalk.red(error instanceof Error ? error.message : String(error)));
+      process.exit(1);
+    }
+  });
+
+griptree.command('unlock <branch>')
+  .description('Unlock a griptree')
+  .action(async (branch) => {
+    try {
+      await griptreeUnlock(branch);
     } catch (error) {
       console.error(chalk.red(error instanceof Error ? error.message : String(error)));
       process.exit(1);

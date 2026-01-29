@@ -149,6 +149,7 @@ src/
 │   ├── env.ts            # gr env
 │   ├── bench.ts          # gr bench
 │   ├── forall.ts         # gr forall
+│   ├── griptree.ts       # gr griptree (worktree-based workspaces)
 │   └── pr/               # PR subcommands
 │       ├── index.ts
 │       ├── create.ts
@@ -198,6 +199,40 @@ All commands use `gr` (or `gitgrip`):
 - `gr env` - Show workspace environment variables
 - `gr bench` - Run benchmarks
 - `gr forall -c "cmd"` - Run command in each repo
+- `gr griptree add/list/remove` - Manage worktree-based multi-branch workspaces
+
+### Griptrees (Multi-Branch Workspaces)
+
+Griptrees allow you to work on multiple branches simultaneously without switching branches. Each griptree is a parallel workspace using git worktrees.
+
+```bash
+# Create a griptree for a feature branch
+gr griptree add feat/auth
+
+# This creates a directory structure:
+# ../feat-auth/
+#   ├── codi/           # worktree of main/codi on feat/auth
+#   ├── codi-private/   # worktree of main/codi-private on feat/auth
+#   └── .gitgrip/manifests/  # worktree of manifest on feat/auth
+
+# List all griptrees
+gr griptree list
+
+# Lock a griptree to prevent accidental removal
+gr griptree lock feat/auth
+
+# Remove a griptree (removes worktrees, not branches)
+gr griptree remove feat/auth
+```
+
+**Benefits:**
+- No branch switching - work on multiple features in parallel
+- Shared git objects - worktrees share `.git/objects` with main
+- Faster than cloning - worktree creation is nearly instant
+
+**Limitations:**
+- Branch exclusivity - can't checkout same branch in two worktrees
+- Separate node_modules - each worktree needs own dependencies
 
 ### File Linking
 - `copyfile`: Copy file from repo to workspace

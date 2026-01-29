@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- `gr griptree` commands for worktree-based multi-branch workspaces
+  - `gr griptree add <branch>` - create parallel workspace on a branch
+  - `gr griptree list` - show all griptrees
+  - `gr griptree remove <branch>` - remove a griptree
+  - `gr griptree lock/unlock <branch>` - protect griptrees from removal
+- `GitStatusCache` class for caching git status calls within command execution
+
+### Changed
+- **Performance:** Parallelized `push`, `sync`, and `commit` commands using `Promise.all()`
+  - Expected 3-5x speedup for workspaces with 5+ repos
+
 ## [0.3.1] - 2026-01-29
 
 ### Added

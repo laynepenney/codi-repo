@@ -45,8 +45,16 @@ async function hasUpstream(repoPath: string): Promise<boolean> {
   }
 }
 
+interface RepoInfoForPush {
+  repo: RepoInfo;
+  branch: string;
+  hasUpstreamConfigured: boolean;
+  needsPush: boolean;
+}
+
 /**
  * Push current branch to remote across all repositories
+ * Uses two-phase parallel approach for better performance
  */
 export async function push(options: PushOptions = {}): Promise<void> {
   const { setUpstream = false, force = false } = options;
@@ -60,62 +68,67 @@ export async function push(options: PushOptions = {}): Promise<void> {
     repos = [...repos, manifestInfo];
   }
 
-  const results: PushResult[] = [];
-  let hasCommits = false;
-
   console.log(chalk.blue('Checking repositories for commits to push...\n'));
 
-  for (const repo of repos) {
-    const exists = await pathExists(repo.absolutePath);
-
-    if (!exists) {
-      continue;
-    }
-
-    const branch = await getCurrentBranch(repo.absolutePath);
-    const hasUpstreamConfigured = await hasUpstream(repo.absolutePath);
-
-    // Check if there are commits to push
-    const needsPush = await hasCommitsAheadOfRemote(repo.absolutePath);
-
-    // Also push if no upstream and --set-upstream is specified
-    const needsUpstreamPush = !hasUpstreamConfigured && setUpstream;
-
-    if (!needsPush && !needsUpstreamPush) {
-      continue;
-    }
-
-    hasCommits = true;
-    const spinner = ora(`Pushing ${repo.name} (${branch})...`).start();
-
-    try {
-      const git = getGitInstance(repo.absolutePath);
-      const pushOptions: string[] = [];
-
-      if (setUpstream || !hasUpstreamConfigured) {
-        pushOptions.push('-u', 'origin', branch);
-      } else {
-        pushOptions.push('origin', branch);
+  // Phase 1: Gather info in parallel
+  const repoInfoResults = await Promise.all(
+    repos.map(async (repo): Promise<RepoInfoForPush | null> => {
+      const exists = await pathExists(repo.absolutePath);
+      if (!exists) {
+        return null;
       }
 
-      if (force) {
-        pushOptions.unshift('--force');
-      }
+      const [branch, hasUpstreamConfigured, needsPush] = await Promise.all([
+        getCurrentBranch(repo.absolutePath),
+        hasUpstream(repo.absolutePath),
+        hasCommitsAheadOfRemote(repo.absolutePath),
+      ]);
 
-      await git.push(pushOptions);
-      spinner.succeed(`${repo.name} (${chalk.cyan(branch)}): pushed`);
-      results.push({ repo, success: true, pushed: true, branch });
-    } catch (error) {
-      const errorMsg = error instanceof Error ? error.message : String(error);
-      spinner.fail(`${repo.name}: ${errorMsg}`);
-      results.push({ repo, success: false, pushed: false, branch, error: errorMsg });
-    }
-  }
+      return { repo, branch, hasUpstreamConfigured, needsPush };
+    })
+  );
 
-  if (!hasCommits) {
+  // Filter out null results and repos that don't need pushing
+  const reposToPush = repoInfoResults.filter((info): info is RepoInfoForPush => {
+    if (!info) return false;
+    const needsUpstreamPush = !info.hasUpstreamConfigured && setUpstream;
+    return info.needsPush || needsUpstreamPush;
+  });
+
+  if (reposToPush.length === 0) {
     console.log(chalk.yellow('No commits to push in any repository.'));
     return;
   }
+
+  // Phase 2: Push repos in parallel
+  const results = await Promise.all(
+    reposToPush.map(async ({ repo, branch, hasUpstreamConfigured }): Promise<PushResult> => {
+      const spinner = ora(`Pushing ${repo.name} (${branch})...`).start();
+
+      try {
+        const git = getGitInstance(repo.absolutePath);
+        const pushOptions: string[] = [];
+
+        if (setUpstream || !hasUpstreamConfigured) {
+          pushOptions.push('-u', 'origin', branch);
+        } else {
+          pushOptions.push('origin', branch);
+        }
+
+        if (force) {
+          pushOptions.unshift('--force');
+        }
+
+        await git.push(pushOptions);
+        spinner.succeed(`${repo.name} (${chalk.cyan(branch)}): pushed`);
+        return { repo, success: true, pushed: true, branch };
+      } catch (error) {
+        const errorMsg = error instanceof Error ? error.message : String(error);
+        spinner.fail(`${repo.name}: ${errorMsg}`);
+        return { repo, success: false, pushed: false, branch, error: errorMsg };
+      }
+    })
+  );
 
   // Summary
   console.log('');

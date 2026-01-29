@@ -118,6 +118,9 @@ gr sync
 | `gr pr merge` | Merge all linked PRs |
 | `gr repo add <url>` | Add a new repository to workspace |
 | `gr forall -c "cmd"` | Run command in each repo |
+| `gr griptree add <branch>` | Create a worktree-based workspace |
+| `gr griptree list` | List all griptrees |
+| `gr griptree remove <branch>` | Remove a griptree |
 
 ### Command Details
 
@@ -293,6 +296,39 @@ repos:
       type: gitlab
       baseUrl: https://gitlab.company.com
 ```
+
+## Griptrees (Multi-Branch Workspaces)
+
+Work on multiple branches simultaneously without switching. Griptrees use git worktrees to create parallel workspace directories.
+
+```bash
+# Create a griptree for a feature branch
+gr griptree add feat/new-feature
+
+# Creates a sibling directory with all repos on that branch:
+# ../feat-new-feature/
+#   ├── frontend/
+#   ├── backend/
+#   └── shared/
+
+# Work in the griptree
+cd ../feat-new-feature
+gr status
+
+# List all griptrees
+gr griptree list
+
+# Lock to prevent accidental removal
+gr griptree lock feat/new-feature
+
+# Remove when done (branches are preserved)
+gr griptree remove feat/new-feature
+```
+
+**Benefits:**
+- No branch switching required
+- Shared git objects (fast creation, minimal disk usage)
+- Independent working directories
 
 ## Shorthand
 
