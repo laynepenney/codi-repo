@@ -19,6 +19,40 @@ Items here should be reviewed before creating GitHub issues.
 
 **Suggested**: Add `--amend` flag to `gr commit`
 
+### Missing: `gr pr checks` command
+
+**Discovered**: 2026-01-29 during PR review workflow
+
+**Problem**: To check CI status across all repos with PRs, must run `gh pr checks <number>` separately for each repo. No way to see combined check status across all linked PRs.
+
+**Workaround**:
+```bash
+gh pr checks 47 --repo laynepenney/gitgrip
+# Repeat for each repo with a PR...
+```
+
+**Suggested**: Add `gr pr checks` command that:
+1. Shows check status for all linked PRs in the current branch
+2. Aggregates pass/fail/pending status across repos
+3. Blocks/warns if any checks are failing
+
+**Example output**:
+```
+PR Checks for branch: feat/my-feature
+
+  Repo       PR    Check              Status
+  ─────────────────────────────────────────────
+  tooling    #47   build              ✓ pass
+  tooling    #47   test               ✓ pass
+  tooling    #47   sync-status        ⏭ skipped
+  frontend   #123  build              ✓ pass
+  frontend   #123  deploy-preview     ⏳ pending
+
+  Summary: 4 passed, 1 pending, 0 failed
+```
+
+**Related**: Issue #30 (cr pr checks) was created previously but not yet implemented.
+
 ---
 
 ## Session Reports
