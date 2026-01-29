@@ -3,8 +3,9 @@ import ora from 'ora';
 import inquirer from 'inquirer';
 import { loadManifest, getAllRepoInfo, getManifestRepoInfo } from '../../lib/manifest.js';
 import { pathExists, getCurrentBranch, isGitRepo } from '../../lib/git.js';
-import { findPRByBranch, getLinkedPRInfo, mergePullRequest } from '../../lib/github.js';
-import type { LinkedPR, PRMergeOptions } from '../../types.js';
+import { getPlatformAdapter } from '../../lib/platform/index.js';
+import { getLinkedPRInfo } from '../../lib/linker.js';
+import type { LinkedPR, PRMergeOptions, RepoInfo } from '../../types.js';
 
 interface MergeOptions {
   method?: 'merge' | 'squash' | 'rebase';
@@ -36,7 +37,7 @@ export async function mergePRs(options: MergeOptions = {}): Promise<void> {
 
   try {
     // Find all PRs for each repo based on its own current branch
-    const prResults: (LinkedPR & { branch: string } | null)[] = await Promise.all(
+    const prResults: ({ pr: LinkedPR & { branch: string }; repo: RepoInfo } | null)[] = await Promise.all(
       clonedRepos.map(async (repo) => {
         const branch = await getCurrentBranch(repo.absolutePath);
 
@@ -45,33 +46,35 @@ export async function mergePRs(options: MergeOptions = {}): Promise<void> {
           return null;
         }
 
-        const pr = await findPRByBranch(repo.owner, repo.repo, branch);
+        const platform = getPlatformAdapter(repo.platformType, repo.platform);
+        const pr = await platform.findPRByBranch(repo.owner, repo.repo, branch);
         if (!pr) {
           return null;
         }
 
-        const prInfo = await getLinkedPRInfo(repo.owner, repo.repo, pr.number, repo.name);
-        return { ...prInfo, branch };
+        const prInfo = await getLinkedPRInfo(repo, pr.number);
+        return { pr: { ...prInfo, branch }, repo };
       })
     );
 
     // Check for manifest PR too
     const manifestInfo = getManifestRepoInfo(manifest, rootDir);
-    let manifestPR: (LinkedPR & { branch: string }) | null = null;
+    let manifestPREntry: { pr: LinkedPR & { branch: string }; repo: RepoInfo } | null = null;
     if (manifestInfo && await isGitRepo(manifestInfo.absolutePath)) {
       const manifestBranch = await getCurrentBranch(manifestInfo.absolutePath);
       if (manifestBranch !== manifestInfo.default_branch) {
-        const pr = await findPRByBranch(manifestInfo.owner, manifestInfo.repo, manifestBranch);
+        const platform = getPlatformAdapter(manifestInfo.platformType, manifestInfo.platform);
+        const pr = await platform.findPRByBranch(manifestInfo.owner, manifestInfo.repo, manifestBranch);
         if (pr) {
-          const prInfo = await getLinkedPRInfo(manifestInfo.owner, manifestInfo.repo, pr.number, manifestInfo.name);
-          manifestPR = { ...prInfo, branch: manifestBranch };
+          const prInfo = await getLinkedPRInfo(manifestInfo, pr.number);
+          manifestPREntry = { pr: { ...prInfo, branch: manifestBranch }, repo: manifestInfo };
         }
       }
     }
 
-    const prsToMerge = prResults.filter((pr): pr is LinkedPR & { branch: string } => pr !== null);
-    if (manifestPR) {
-      prsToMerge.push(manifestPR);
+    const prsToMerge = prResults.filter((entry): entry is { pr: LinkedPR & { branch: string }; repo: RepoInfo } => entry !== null);
+    if (manifestPREntry) {
+      prsToMerge.push(manifestPREntry);
     }
     spinner.stop();
 
@@ -81,27 +84,28 @@ export async function mergePRs(options: MergeOptions = {}): Promise<void> {
     }
 
     // Determine the branch name for display
-    const branches = [...new Set(prsToMerge.map(pr => pr.branch))];
+    const branches = [...new Set(prsToMerge.map(entry => entry.pr.branch))];
     const branchDisplay = branches.length === 1 ? branches[0] : `${branches.length} branches`;
 
     console.log(chalk.blue(`Merging PRs for branch: ${chalk.cyan(branchDisplay)}\n`));
 
     // Check if all PRs are ready
     const notReady = prsToMerge.filter(
-      (pr) => pr.state !== 'open' || !pr.approved || !pr.checksPass || !pr.mergeable
+      (entry) => entry.pr.state !== 'open' || !entry.pr.approved || !entry.pr.checksPass || !entry.pr.mergeable
     );
 
     if (notReady.length > 0 && !options.force) {
       console.log(chalk.yellow('Some PRs are not ready to merge:\n'));
 
-      for (const pr of notReady) {
+      for (const entry of notReady) {
         const issues: string[] = [];
-        if (pr.state !== 'open') issues.push(`state: ${pr.state}`);
-        if (!pr.approved) issues.push('not approved');
-        if (!pr.checksPass) issues.push('checks not passing');
-        if (!pr.mergeable) issues.push('not mergeable');
+        if (entry.pr.state !== 'open') issues.push(`state: ${entry.pr.state}`);
+        if (!entry.pr.approved) issues.push('not approved');
+        if (!entry.pr.checksPass) issues.push('checks not passing');
+        if (!entry.pr.mergeable) issues.push('not mergeable');
 
-        console.log(`  ${pr.repoName} #${pr.number}: ${chalk.dim(issues.join(', '))}`);
+        const platformLabel = entry.pr.platformType && entry.pr.platformType !== 'github' ? ` (${entry.pr.platformType})` : '';
+        console.log(`  ${entry.pr.repoName}${chalk.dim(platformLabel)} #${entry.pr.number}: ${chalk.dim(issues.join(', '))}`);
       }
 
       console.log('');
@@ -111,9 +115,10 @@ export async function mergePRs(options: MergeOptions = {}): Promise<void> {
 
     // Show what will be merged
     console.log('PRs to merge:');
-    for (const pr of prsToMerge) {
-      const statusIcon = pr.approved && pr.checksPass ? chalk.green('✓') : chalk.yellow('⚠');
-      console.log(`  ${statusIcon} ${pr.repoName} #${pr.number}`);
+    for (const entry of prsToMerge) {
+      const statusIcon = entry.pr.approved && entry.pr.checksPass ? chalk.green('✓') : chalk.yellow('⚠');
+      const platformLabel = entry.pr.platformType && entry.pr.platformType !== 'github' ? ` (${entry.pr.platformType})` : '';
+      console.log(`  ${statusIcon} ${entry.pr.repoName}${chalk.dim(platformLabel)} #${entry.pr.number}`);
     }
     console.log('');
 
@@ -141,20 +146,22 @@ export async function mergePRs(options: MergeOptions = {}): Promise<void> {
       deleteBranch: options.deleteBranch ?? true,
     };
 
-    const results: { pr: LinkedPR; success: boolean; error?: string }[] = [];
+    const results: { entry: { pr: LinkedPR; repo: RepoInfo }; success: boolean; error?: string }[] = [];
 
-    for (const pr of prsToMerge) {
-      const prSpinner = ora(`Merging ${pr.repoName} #${pr.number}...`).start();
+    for (const entry of prsToMerge) {
+      const platformLabel = entry.pr.platformType && entry.pr.platformType !== 'github' ? ` (${entry.pr.platformType})` : '';
+      const prSpinner = ora(`Merging ${entry.pr.repoName}${platformLabel} #${entry.pr.number}...`).start();
 
       try {
-        const success = await mergePullRequest(pr.owner, pr.repo, pr.number, mergeOptions);
+        const platform = getPlatformAdapter(entry.repo.platformType, entry.repo.platform);
+        const success = await platform.mergePullRequest(entry.pr.owner, entry.pr.repo, entry.pr.number, mergeOptions);
 
         if (success) {
-          prSpinner.succeed(`${pr.repoName} #${pr.number}: merged`);
-          results.push({ pr, success: true });
+          prSpinner.succeed(`${entry.pr.repoName}${platformLabel} #${entry.pr.number}: merged`);
+          results.push({ entry, success: true });
         } else {
-          prSpinner.fail(`${pr.repoName} #${pr.number}: merge failed`);
-          results.push({ pr, success: false, error: 'Merge API call failed' });
+          prSpinner.fail(`${entry.pr.repoName}${platformLabel} #${entry.pr.number}: merge failed`);
+          results.push({ entry, success: false, error: 'Merge API call failed' });
 
           // Stop on first failure for all-or-nothing
           if (manifest.settings.merge_strategy === 'all-or-nothing') {
@@ -167,8 +174,8 @@ export async function mergePRs(options: MergeOptions = {}): Promise<void> {
         }
       } catch (error) {
         const errorMsg = error instanceof Error ? error.message : String(error);
-        prSpinner.fail(`${pr.repoName} #${pr.number}: ${errorMsg}`);
-        results.push({ pr, success: false, error: errorMsg });
+        prSpinner.fail(`${entry.pr.repoName}${platformLabel} #${entry.pr.number}: ${errorMsg}`);
+        results.push({ entry, success: false, error: errorMsg });
 
         if (manifest.settings.merge_strategy === 'all-or-nothing') {
           console.log('');
@@ -196,7 +203,7 @@ export async function mergePRs(options: MergeOptions = {}): Promise<void> {
       );
 
       for (const result of results.filter((r) => !r.success)) {
-        console.log(chalk.red(`  ✗ ${result.pr.repoName}: ${result.error}`));
+        console.log(chalk.red(`  ✗ ${result.entry.pr.repoName}: ${result.error}`));
       }
     }
   } catch (error) {

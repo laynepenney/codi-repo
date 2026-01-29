@@ -1,7 +1,8 @@
 import { readFile, writeFile, access } from 'fs/promises';
 import { resolve, dirname, join, normalize } from 'path';
 import YAML from 'yaml';
-import type { Manifest, RepoInfo, StateFile, GitHubRepoInfo, CopyFileConfig, LinkFileConfig, WorkspaceScript } from '../types.js';
+import type { Manifest, RepoInfo, StateFile, GitHubRepoInfo, CopyFileConfig, LinkFileConfig, WorkspaceScript, PlatformType, ParsedRepoInfo } from '../types.js';
+import { parseRepoUrl as platformParseRepoUrl, detectPlatform } from './platform/index.js';
 
 // AOSP-style: manifest lives in .gitgrip/manifests/manifest.yaml
 const GITGRIP_DIR = '.gitgrip';
@@ -262,6 +263,7 @@ export async function createManifest(manifestsDir: string, manifest: Manifest): 
 
 /**
  * Parse GitHub owner/repo from a git URL
+ * @deprecated Use parseRepoUrl for multi-platform support
  */
 export function parseGitHubUrl(url: string): GitHubRepoInfo {
   // SSH format: git@github.com:owner/repo.git
@@ -280,16 +282,57 @@ export function parseGitHubUrl(url: string): GitHubRepoInfo {
 }
 
 /**
+ * Parse repository info from a git URL (supports GitHub, GitLab, Azure DevOps)
+ */
+export function parseRepoUrl(url: string): ParsedRepoInfo {
+  const parsed = platformParseRepoUrl(url);
+  if (!parsed) {
+    throw new Error(
+      `Unable to parse git URL: ${url}. ` +
+      `Supported platforms: GitHub, GitLab, Azure DevOps`
+    );
+  }
+  return {
+    owner: parsed.owner,
+    repo: parsed.repo,
+    project: parsed.project,
+    platform: parsed.platform,
+  };
+}
+
+/**
+ * Detect platform type from URL or config
+ */
+export function getPlatformType(url: string, configPlatform?: { type: PlatformType }): PlatformType {
+  // Use explicit config if provided
+  if (configPlatform?.type) {
+    return configPlatform.type;
+  }
+
+  // Auto-detect from URL
+  const detected = detectPlatform(url);
+  if (!detected) {
+    // Default to github for backward compatibility
+    return 'github';
+  }
+  return detected;
+}
+
+/**
  * Get full repo info with computed fields
  */
 export function getRepoInfo(name: string, config: Manifest['repos'][string], rootDir: string): RepoInfo {
-  const { owner, repo } = parseGitHubUrl(config.url);
+  const parsed = parseRepoUrl(config.url);
+  const platformType = getPlatformType(config.url, config.platform);
+
   return {
     ...config,
     name,
     absolutePath: resolve(rootDir, config.path),
-    owner,
-    repo,
+    owner: parsed.owner,
+    repo: parsed.repo,
+    platformType,
+    project: parsed.project,
   };
 }
 
@@ -312,7 +355,8 @@ export function getManifestRepoInfo(manifest: Manifest, rootDir: string): RepoIn
   const manifestsDir = getManifestsDir(rootDir);
 
   try {
-    const parsed = parseGitHubUrl(manifest.manifest.url);
+    const parsed = parseRepoUrl(manifest.manifest.url);
+    const platformType = getPlatformType(manifest.manifest.url, manifest.manifest.platform);
 
     return {
       name: 'manifest',
@@ -322,9 +366,11 @@ export function getManifestRepoInfo(manifest: Manifest, rootDir: string): RepoIn
       default_branch: manifest.manifest.default_branch ?? 'main',
       owner: parsed.owner,
       repo: parsed.repo,
+      platformType,
+      project: parsed.project,
     };
   } catch {
-    // Invalid GitHub URL format
+    // Invalid URL format
     return null;
   }
 }

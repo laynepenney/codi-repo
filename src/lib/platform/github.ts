@@ -1,0 +1,364 @@
+/**
+ * GitHub hosting platform adapter
+ */
+import { Octokit } from '@octokit/rest';
+import { execSync } from 'child_process';
+import type {
+  HostingPlatform,
+  PlatformType,
+  PlatformConfig,
+  ParsedRepoInfo,
+  PullRequest,
+  PRCreateResult,
+  PRMergeOptions,
+  PRReview,
+  StatusCheckResult,
+} from './types.js';
+
+/**
+ * GitHub platform adapter implementing the HostingPlatform interface
+ */
+export class GitHubPlatform implements HostingPlatform {
+  readonly type: PlatformType = 'github';
+
+  private octokit: Octokit | null = null;
+  private config: PlatformConfig;
+
+  constructor(config?: PlatformConfig) {
+    this.config = config ?? { type: 'github' };
+  }
+
+  /**
+   * Get GitHub token from environment or gh CLI
+   */
+  async getToken(): Promise<string> {
+    // Try environment variable first
+    if (process.env.GITHUB_TOKEN) {
+      return process.env.GITHUB_TOKEN;
+    }
+
+    // Try gh CLI
+    try {
+      const token = execSync('gh auth token', { encoding: 'utf-8' }).trim();
+      if (token) {
+        return token;
+      }
+    } catch {
+      // gh CLI not available or not authenticated
+    }
+
+    throw new Error(
+      'GitHub token not found. Set GITHUB_TOKEN environment variable or run "gh auth login"'
+    );
+  }
+
+  /**
+   * Get or create Octokit instance
+   */
+  private async getOctokit(): Promise<Octokit> {
+    if (!this.octokit) {
+      const token = await this.getToken();
+      const options: { auth: string; baseUrl?: string } = { auth: token };
+
+      // Support GitHub Enterprise
+      if (this.config.baseUrl) {
+        options.baseUrl = `${this.config.baseUrl}/api/v3`;
+      }
+
+      this.octokit = new Octokit(options);
+    }
+    return this.octokit;
+  }
+
+  /**
+   * Create a pull request
+   */
+  async createPullRequest(
+    owner: string,
+    repo: string,
+    head: string,
+    base: string,
+    title: string,
+    body = '',
+    draft = false
+  ): Promise<PRCreateResult> {
+    const octokit = await this.getOctokit();
+    const response = await octokit.pulls.create({
+      owner,
+      repo,
+      head,
+      base,
+      title,
+      body,
+      draft,
+    });
+
+    return {
+      number: response.data.number,
+      url: response.data.html_url,
+    };
+  }
+
+  /**
+   * Get pull request details
+   */
+  async getPullRequest(
+    owner: string,
+    repo: string,
+    pullNumber: number
+  ): Promise<PullRequest> {
+    const octokit = await this.getOctokit();
+    const response = await octokit.pulls.get({
+      owner,
+      repo,
+      pull_number: pullNumber,
+    });
+
+    return {
+      number: response.data.number,
+      url: response.data.html_url,
+      title: response.data.title,
+      body: response.data.body ?? '',
+      state: response.data.state as 'open' | 'closed',
+      merged: response.data.merged,
+      mergeable: response.data.mergeable,
+      head: {
+        ref: response.data.head.ref,
+        sha: response.data.head.sha,
+      },
+      base: {
+        ref: response.data.base.ref,
+      },
+    };
+  }
+
+  /**
+   * Update pull request body
+   */
+  async updatePullRequestBody(
+    owner: string,
+    repo: string,
+    pullNumber: number,
+    body: string
+  ): Promise<void> {
+    const octokit = await this.getOctokit();
+    await octokit.pulls.update({
+      owner,
+      repo,
+      pull_number: pullNumber,
+      body,
+    });
+  }
+
+  /**
+   * Merge a pull request
+   */
+  async mergePullRequest(
+    owner: string,
+    repo: string,
+    pullNumber: number,
+    options: PRMergeOptions = {}
+  ): Promise<boolean> {
+    const octokit = await this.getOctokit();
+    const mergeMethod = options.method ?? 'merge';
+
+    try {
+      await octokit.pulls.merge({
+        owner,
+        repo,
+        pull_number: pullNumber,
+        merge_method: mergeMethod,
+      });
+
+      // Delete branch if requested
+      if (options.deleteBranch) {
+        const pr = await this.getPullRequest(owner, repo, pullNumber);
+        try {
+          await octokit.git.deleteRef({
+            owner,
+            repo,
+            ref: `heads/${pr.head.ref}`,
+          });
+        } catch {
+          // Branch deletion failure is not critical
+        }
+      }
+
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Find PR by branch name
+   */
+  async findPRByBranch(
+    owner: string,
+    repo: string,
+    branch: string
+  ): Promise<PRCreateResult | null> {
+    const octokit = await this.getOctokit();
+    const response = await octokit.pulls.list({
+      owner,
+      repo,
+      head: `${owner}:${branch}`,
+      state: 'open',
+    });
+
+    if (response.data.length > 0) {
+      return {
+        number: response.data[0].number,
+        url: response.data[0].html_url,
+      };
+    }
+    return null;
+  }
+
+  /**
+   * Check if PR is approved
+   */
+  async isPullRequestApproved(
+    owner: string,
+    repo: string,
+    pullNumber: number
+  ): Promise<boolean> {
+    const reviews = await this.getPullRequestReviews(owner, repo, pullNumber);
+    // Consider approved if at least one APPROVED review and no CHANGES_REQUESTED
+    const hasApproval = reviews.some((r) => r.state === 'APPROVED');
+    const hasChangesRequested = reviews.some((r) => r.state === 'CHANGES_REQUESTED');
+    return hasApproval && !hasChangesRequested;
+  }
+
+  /**
+   * Get PR reviews
+   */
+  async getPullRequestReviews(
+    owner: string,
+    repo: string,
+    pullNumber: number
+  ): Promise<PRReview[]> {
+    const octokit = await this.getOctokit();
+    const response = await octokit.pulls.listReviews({
+      owner,
+      repo,
+      pull_number: pullNumber,
+    });
+
+    return response.data.map((review) => ({
+      state: review.state,
+      user: review.user?.login ?? 'unknown',
+    }));
+  }
+
+  /**
+   * Get status checks for a commit
+   */
+  async getStatusChecks(
+    owner: string,
+    repo: string,
+    ref: string
+  ): Promise<StatusCheckResult> {
+    const octokit = await this.getOctokit();
+    const response = await octokit.repos.getCombinedStatusForRef({
+      owner,
+      repo,
+      ref,
+    });
+
+    return {
+      state: response.data.state as 'success' | 'failure' | 'pending',
+      statuses: response.data.statuses.map((s) => ({
+        context: s.context,
+        state: s.state,
+      })),
+    };
+  }
+
+  /**
+   * Parse GitHub URL to extract owner/repo
+   */
+  parseRepoUrl(url: string): ParsedRepoInfo | null {
+    // SSH format: git@github.com:owner/repo.git
+    const sshMatch = url.match(/git@github\.com:([^/]+)\/(.+?)(?:\.git)?$/);
+    if (sshMatch) {
+      return { owner: sshMatch[1], repo: sshMatch[2] };
+    }
+
+    // HTTPS format: https://github.com/owner/repo.git
+    const httpsMatch = url.match(/https?:\/\/github\.com\/([^/]+)\/(.+?)(?:\.git)?$/);
+    if (httpsMatch) {
+      return { owner: httpsMatch[1], repo: httpsMatch[2] };
+    }
+
+    // GitHub Enterprise SSH: git@github.company.com:owner/repo.git
+    if (this.config.baseUrl) {
+      const host = new URL(this.config.baseUrl).host;
+      const enterpriseSshRegex = new RegExp(`git@${host.replace('.', '\\.')}:([^/]+)/(.+?)(?:\\.git)?$`);
+      const enterpriseSshMatch = url.match(enterpriseSshRegex);
+      if (enterpriseSshMatch) {
+        return { owner: enterpriseSshMatch[1], repo: enterpriseSshMatch[2] };
+      }
+
+      // GitHub Enterprise HTTPS
+      const enterpriseHttpsRegex = new RegExp(`https?://${host.replace('.', '\\.')}/([^/]+)/(.+?)(?:\\.git)?$`);
+      const enterpriseHttpsMatch = url.match(enterpriseHttpsRegex);
+      if (enterpriseHttpsMatch) {
+        return { owner: enterpriseHttpsMatch[1], repo: enterpriseHttpsMatch[2] };
+      }
+    }
+
+    return null;
+  }
+
+  /**
+   * Check if URL matches GitHub
+   */
+  matchesUrl(url: string): boolean {
+    return this.parseRepoUrl(url) !== null;
+  }
+
+  /**
+   * Generate HTML comment for linked PR tracking
+   */
+  generateLinkedPRComment(links: { repoName: string; number: number }[]): string {
+    const prLinks = links.map((pr) => `${pr.repoName}#${pr.number}`).join(',');
+    return `<!-- codi-repo:links:${prLinks} -->`;
+  }
+
+  /**
+   * Parse linked PRs from PR body
+   */
+  parseLinkedPRComment(body: string): { repoName: string; number: number }[] {
+    const match = body.match(/<!-- codi-repo:links:(.+?) -->/);
+    if (!match) {
+      return [];
+    }
+
+    const links = match[1].split(',');
+    return links.map((link) => {
+      const [repoName, numStr] = link.split('#');
+      return { repoName, number: parseInt(numStr, 10) };
+    });
+  }
+}
+
+// Singleton instance for backward compatibility
+let defaultInstance: GitHubPlatform | null = null;
+
+/**
+ * Get the default GitHub platform instance
+ */
+export function getGitHubPlatform(config?: PlatformConfig): GitHubPlatform {
+  if (!defaultInstance) {
+    defaultInstance = new GitHubPlatform(config);
+  }
+  return defaultInstance;
+}
+
+/**
+ * Create a new GitHub platform instance (for custom configurations)
+ */
+export function createGitHubPlatform(config?: PlatformConfig): GitHubPlatform {
+  return new GitHubPlatform(config);
+}

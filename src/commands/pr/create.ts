@@ -1,7 +1,7 @@
 import chalk from 'chalk';
 import ora from 'ora';
 import inquirer from 'inquirer';
-import { loadManifest, getAllRepoInfo, loadState, saveState, parseGitHubUrl, getManifestRepoInfo } from '../../lib/manifest.js';
+import { loadManifest, getAllRepoInfo, loadState, saveState, getManifestRepoInfo } from '../../lib/manifest.js';
 import {
   pathExists,
   getCurrentBranch,
@@ -10,13 +10,8 @@ import {
   remoteBranchExists,
   isGitRepo,
 } from '../../lib/git.js';
-import {
-  createPullRequest,
-  createLinkedPRs,
-  generateManifestPRBody,
-  findPRByBranch,
-} from '../../lib/github.js';
-import { linkBranchToManifestPR, saveLinkedPRs } from '../../lib/linker.js';
+import { getPlatformAdapter } from '../../lib/platform/index.js';
+import { generateManifestPRBody, getLinkedPRInfo } from '../../lib/linker.js';
 import type { RepoInfo, PRCreateOptions, LinkedPR } from '../../types.js';
 
 interface CreateOptions {
@@ -112,10 +107,12 @@ export async function createPR(options: CreateOptions = {}): Promise<void> {
   const totalChanges = withChanges.length + (manifestHasChanges ? 1 : 0);
   console.log(`Found changes in ${totalChanges} repos:`);
   for (const { repo } of withChanges) {
-    console.log(`  ${chalk.green('•')} ${repo.name}`);
+    const platformLabel = repo.platformType !== 'github' ? ` (${repo.platformType})` : '';
+    console.log(`  ${chalk.green('•')} ${repo.name}${chalk.dim(platformLabel)}`);
   }
   if (manifestHasChanges && manifestInfo) {
-    console.log(`  ${chalk.green('•')} ${manifestInfo.name}`);
+    const platformLabel = manifestInfo.platformType !== 'github' ? ` (${manifestInfo.platformType})` : '';
+    console.log(`  ${chalk.green('•')} ${manifestInfo.name}${chalk.dim(platformLabel)}`);
   }
   console.log('');
 
@@ -193,16 +190,44 @@ export async function createPR(options: CreateOptions = {}): Promise<void> {
       base: options.base,
     };
 
-    // Create PRs in each repo
-    const linkedPRs = await createLinkedPRs(reposForPR, branchName, prOptions);
+    // Create PRs in each repo using their respective platforms
+    const linkedPRs: LinkedPR[] = [];
+
+    for (const repo of reposForPR) {
+      const platform = getPlatformAdapter(repo.platformType, repo.platform);
+
+      // Check if PR already exists
+      const existing = await platform.findPRByBranch(repo.owner, repo.repo, branchName);
+      if (existing) {
+        const info = await getLinkedPRInfo(repo, existing.number);
+        linkedPRs.push(info);
+        continue;
+      }
+
+      // Create PR
+      const pr = await platform.createPullRequest(
+        repo.owner,
+        repo.repo,
+        branchName,
+        prOptions.base ?? repo.default_branch,
+        prOptions.title,
+        prOptions.body ?? '',
+        prOptions.draft
+      );
+
+      const info = await getLinkedPRInfo(repo, pr.number);
+      linkedPRs.push(info);
+    }
 
     // Create manifest PR if manifest has changes
     let manifestPR: LinkedPR | null = null;
     if (manifestHasChanges && manifestInfo) {
       try {
+        const manifestPlatform = getPlatformAdapter(manifestInfo.platformType, manifestInfo.platform);
+
         // Generate manifest PR body with linked PR table
         const manifestBody = generateManifestPRBody(title, linkedPRs, body);
-        const manifestPRResult = await createPullRequest(
+        const manifestPRResult = await manifestPlatform.createPullRequest(
           manifestInfo.owner,
           manifestInfo.repo,
           branchName,
@@ -221,6 +246,7 @@ export async function createPR(options: CreateOptions = {}): Promise<void> {
           approved: false,
           checksPass: true,
           mergeable: true,
+          platformType: manifestInfo.platformType,
         };
       } catch (error) {
         // Don't fail the whole operation if manifest PR fails
@@ -233,10 +259,12 @@ export async function createPR(options: CreateOptions = {}): Promise<void> {
     // Display results
     console.log(chalk.green('Created PRs:'));
     for (const pr of linkedPRs) {
-      console.log(`  ${pr.repoName}: ${chalk.cyan(pr.url)}`);
+      const platformLabel = pr.platformType && pr.platformType !== 'github' ? ` (${pr.platformType})` : '';
+      console.log(`  ${pr.repoName}${chalk.dim(platformLabel)}: ${chalk.cyan(pr.url)}`);
     }
     if (manifestPR) {
-      console.log(`  ${manifestPR.repoName}: ${chalk.cyan(manifestPR.url)}`);
+      const platformLabel = manifestPR.platformType && manifestPR.platformType !== 'github' ? ` (${manifestPR.platformType})` : '';
+      console.log(`  ${manifestPR.repoName}${chalk.dim(platformLabel)}: ${chalk.cyan(manifestPR.url)}`);
     }
 
     // Generate a summary for the user

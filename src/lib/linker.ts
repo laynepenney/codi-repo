@@ -1,13 +1,6 @@
-import type { LinkedPR, ManifestPR, RepoInfo, StateFile } from '../types.js';
-import {
-  getLinkedPRInfo,
-  getPullRequest,
-  updatePullRequestBody,
-  generateManifestPRBody,
-  parseLinkedPRsFromBody,
-  mergePullRequest,
-  isPullRequestApproved,
-} from './github.js';
+import type { LinkedPR, ManifestPR, RepoInfo, PlatformType } from '../types.js';
+import { getPlatformAdapter } from './platform/index.js';
+import type { HostingPlatform } from './platform/types.js';
 import { loadState, saveState, getAllRepoInfo } from './manifest.js';
 import type { Manifest } from '../types.js';
 
@@ -61,7 +54,40 @@ export async function getLinkedPRsFromState(
 }
 
 /**
- * Refresh linked PR status from GitHub
+ * Get linked PR info using the appropriate platform adapter
+ */
+export async function getLinkedPRInfo(
+  repoInfo: RepoInfo,
+  prNumber: number
+): Promise<LinkedPR> {
+  const platform = getPlatformAdapter(repoInfo.platformType, repoInfo.platform);
+  const pr = await platform.getPullRequest(repoInfo.owner, repoInfo.repo, prNumber);
+  const approved = await platform.isPullRequestApproved(repoInfo.owner, repoInfo.repo, prNumber);
+  const checks = await platform.getStatusChecks(repoInfo.owner, repoInfo.repo, pr.head.sha);
+
+  let state: 'open' | 'closed' | 'merged';
+  if (pr.merged) {
+    state = 'merged';
+  } else {
+    state = pr.state;
+  }
+
+  return {
+    repoName: repoInfo.name,
+    owner: repoInfo.owner,
+    repo: repoInfo.repo,
+    number: pr.number,
+    url: pr.url,
+    state,
+    approved,
+    checksPass: checks.state === 'success',
+    mergeable: pr.mergeable ?? false,
+    platformType: repoInfo.platformType,
+  };
+}
+
+/**
+ * Refresh linked PR status from their respective platforms
  */
 export async function refreshLinkedPRStatus(
   manifest: Manifest,
@@ -77,7 +103,7 @@ export async function refreshLinkedPRStatus(
       if (!repoInfo) {
         return pr; // Keep old info if repo not found
       }
-      return getLinkedPRInfo(repoInfo.owner, repoInfo.repo, pr.number, pr.repoName);
+      return getLinkedPRInfo(repoInfo, pr.number);
     })
   );
 
@@ -90,14 +116,14 @@ export async function refreshLinkedPRStatus(
 export async function getManifestPRInfo(
   manifest: Manifest,
   rootDir: string,
-  manifestOwner: string,
-  manifestRepo: string,
+  manifestRepoInfo: RepoInfo,
   manifestPRNumber: number
 ): Promise<ManifestPR> {
-  const pr = await getPullRequest(manifestOwner, manifestRepo, manifestPRNumber);
+  const platform = getPlatformAdapter(manifestRepoInfo.platformType, manifestRepoInfo.platform);
+  const pr = await platform.getPullRequest(manifestRepoInfo.owner, manifestRepoInfo.repo, manifestPRNumber);
 
   // Parse linked PRs from body
-  const parsedLinks = parseLinkedPRsFromBody(pr.body);
+  const parsedLinks = platform.parseLinkedPRComment(pr.body);
   const repos = getAllRepoInfo(manifest, rootDir);
   const repoMap = new Map(repos.map((r) => [r.name, r]));
 
@@ -119,7 +145,7 @@ export async function getManifestPRInfo(
           mergeable: false,
         };
       }
-      return getLinkedPRInfo(repoInfo.owner, repoInfo.repo, number, repoName);
+      return getLinkedPRInfo(repoInfo, number);
     })
   );
 
@@ -147,31 +173,85 @@ export async function getManifestPRInfo(
 }
 
 /**
+ * Generate manifest PR body with linked PR table
+ */
+export function generateManifestPRBody(
+  title: string,
+  linkedPRs: LinkedPR[],
+  additionalBody?: string
+): string {
+  const prTable = linkedPRs
+    .map((pr) => {
+      const statusIcon = pr.state === 'merged' ? ':white_check_mark:' : pr.state === 'open' ? ':hourglass:' : ':x:';
+      const approvalIcon = pr.approved ? ':white_check_mark:' : ':hourglass:';
+      const checksIcon = pr.checksPass ? ':white_check_mark:' : ':hourglass:';
+      return `| ${pr.repoName} | [#${pr.number}](${pr.url}) | ${statusIcon} ${pr.state} | ${approvalIcon} | ${checksIcon} |`;
+    })
+    .join('\n');
+
+  // Generate linked PR comment (platform-agnostic format)
+  const prLinks = linkedPRs.map((pr) => `${pr.repoName}#${pr.number}`).join(',');
+
+  return `## Cross-Repository PR
+
+${additionalBody ?? ''}
+
+### Linked Pull Requests
+
+| Repository | PR | Status | Approved | Checks |
+|------------|-----|--------|----------|--------|
+${prTable}
+
+**Merge Policy:** All-or-nothing - all linked PRs must be approved before merge.
+
+---
+<!-- codi-repo:links:${prLinks} -->
+`;
+}
+
+/**
+ * Parse linked PRs from manifest PR body (platform-agnostic)
+ */
+export function parseLinkedPRsFromBody(body: string): { repoName: string; number: number }[] {
+  const match = body.match(/<!-- codi-repo:links:(.+?) -->/);
+  if (!match) {
+    return [];
+  }
+
+  const links = match[1].split(',');
+  return links.map((link) => {
+    // Handle both # (GitHub) and ! (GitLab) separators
+    const [repoName, numStr] = link.split(/[#!]/);
+    return { repoName, number: parseInt(numStr, 10) };
+  });
+}
+
+/**
  * Update manifest PR body with current linked PR status
  */
 export async function syncManifestPRBody(
   manifest: Manifest,
   rootDir: string,
-  manifestOwner: string,
-  manifestRepo: string,
+  manifestRepoInfo: RepoInfo,
   manifestPRNumber: number
 ): Promise<void> {
   const manifestPR = await getManifestPRInfo(
     manifest,
     rootDir,
-    manifestOwner,
-    manifestRepo,
+    manifestRepoInfo,
     manifestPRNumber
   );
 
+  const platform = getPlatformAdapter(manifestRepoInfo.platformType, manifestRepoInfo.platform);
+
   // Get original PR for title
-  const pr = await getPullRequest(manifestOwner, manifestRepo, manifestPRNumber);
+  const pr = await platform.getPullRequest(manifestRepoInfo.owner, manifestRepoInfo.repo, manifestPRNumber);
 
   // Generate updated body
   const newBody = generateManifestPRBody(pr.title, manifestPR.linkedPRs);
 
   // Update PR
-  await updatePullRequestBody(manifestOwner, manifestRepo, manifestPRNumber, newBody);
+  await platform.updatePullRequestBody(manifestRepoInfo.owner, manifestRepoInfo.repo, manifestPRNumber, newBody);
 }
 
 /**
@@ -180,8 +260,7 @@ export async function syncManifestPRBody(
 export async function mergeAllLinkedPRs(
   manifest: Manifest,
   rootDir: string,
-  manifestOwner: string,
-  manifestRepo: string,
+  manifestRepoInfo: RepoInfo,
   manifestPRNumber: number,
   options: { method?: 'merge' | 'squash' | 'rebase'; deleteBranch?: boolean } = {}
 ): Promise<{
@@ -192,8 +271,7 @@ export async function mergeAllLinkedPRs(
   const manifestPR = await getManifestPRInfo(
     manifest,
     rootDir,
-    manifestOwner,
-    manifestRepo,
+    manifestRepoInfo,
     manifestPRNumber
   );
 
@@ -220,11 +298,28 @@ export async function mergeAllLinkedPRs(
     };
   }
 
+  const repos = getAllRepoInfo(manifest, rootDir);
+  const repoMap = new Map(repos.map((r) => [r.name, r]));
+
   const mergedPRs: { repoName: string; number: number }[] = [];
 
-  // Merge each linked PR
+  // Merge each linked PR using the appropriate platform
   for (const linkedPR of manifestPR.linkedPRs) {
-    const merged = await mergePullRequest(linkedPR.owner, linkedPR.repo, linkedPR.number, options);
+    const repoInfo = repoMap.get(linkedPR.repoName);
+    if (!repoInfo) {
+      return {
+        success: false,
+        mergedPRs,
+        failedPR: {
+          repoName: linkedPR.repoName,
+          number: linkedPR.number,
+          error: 'Repository not found in manifest',
+        },
+      };
+    }
+
+    const platform = getPlatformAdapter(repoInfo.platformType, repoInfo.platform);
+    const merged = await platform.mergePullRequest(linkedPR.owner, linkedPR.repo, linkedPR.number, options);
     if (!merged) {
       return {
         success: false,
@@ -240,9 +335,10 @@ export async function mergeAllLinkedPRs(
   }
 
   // Merge manifest PR
-  const manifestMerged = await mergePullRequest(
-    manifestOwner,
-    manifestRepo,
+  const manifestPlatform = getPlatformAdapter(manifestRepoInfo.platformType, manifestRepoInfo.platform);
+  const manifestMerged = await manifestPlatform.mergePullRequest(
+    manifestRepoInfo.owner,
+    manifestRepoInfo.repo,
     manifestPRNumber,
     options
   );

@@ -326,6 +326,7 @@ describe('GitHub API Integration', () => {
         approved: true,
         checksPass: true,
         mergeable: true,
+        platformType: 'github',
       });
     });
 
