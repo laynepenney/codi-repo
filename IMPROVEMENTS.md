@@ -316,3 +316,19 @@ _Items that have been implemented. Keep for historical reference._
 ### `cr branch --repo` flag (Issue #2)
 - **Added in**: PR #11
 - **Description**: Create branches in specific repos only with `cr branch feat/x --repo tooling`
+
+---
+
+## Issues Created from These Entries
+
+| Issue # | Title |
+|---------|-------|
+| #58 | feat: add --body flag to gr pr create |
+| #59 | feat: add --amend flag to gr commit |
+| #60 | feat: add gr pr checks command |
+| #61 | feat: gr forall should default to changed repos only |
+| #62 | feat: add single-repo branch creation for fixing commits |
+| #63 | fix: gr pr create command times out |
+
+Created: 2025-12-05
+
