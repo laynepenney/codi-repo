@@ -23,6 +23,8 @@
     "multi-repo",
     "monorepo",
     "github",
+    "gitlab",
+    "azure-devops",
     "pr",
     "cli",
     "workflow"

@@ -1,4 +1,18 @@
 /**
+ * Hosting platform type for repositories
+ */
+export type PlatformType = 'github' | 'gitlab' | 'azure-devops';
+
+/**
+ * Platform configuration for self-hosted instances
+ */
+export interface PlatformConfig {
+  type: PlatformType;
+  /** Base URL for self-hosted instances (e.g., https://gitlab.company.com) */
+  baseUrl?: string;
+}
+
+/**
  * Configuration for copying a file from repo to workspace
  */
 export interface CopyFileConfig {
@@ -32,6 +46,8 @@ export interface RepoConfig {
   copyfile?: CopyFileConfig[];
   /** Symlinks to create from repo to workspace */
   linkfile?: LinkFileConfig[];
+  /** Optional platform override (auto-detected from URL if not specified) */
+  platform?: PlatformConfig;
 }
 
 /**
@@ -46,6 +62,8 @@ export interface ManifestRepoConfig {
   copyfile?: CopyFileConfig[];
   /** Symlinks to create from manifest repo to workspace */
   linkfile?: LinkFileConfig[];
+  /** Optional platform override (auto-detected from URL if not specified) */
+  platform?: PlatformConfig;
 }
 
 /**
@@ -137,10 +155,14 @@ export interface RepoInfo extends RepoConfig {
   name: string;
   /** Absolute path on disk */
   absolutePath: string;
-  /** Owner from GitHub URL */
+  /** Owner/namespace from git URL (for Azure DevOps: org/project) */
   owner: string;
-  /** Repo name from GitHub URL */
+  /** Repo name from git URL */
   repo: string;
+  /** Detected or configured platform type */
+  platformType: PlatformType;
+  /** Project name (Azure DevOps only) */
+  project?: string;
 }
 
 /**
@@ -173,9 +195,9 @@ export interface RepoStatus {
 export interface LinkedPR {
   /** Repository name (from manifest) */
   repoName: string;
-  /** Owner on GitHub */
+  /** Owner/namespace from git URL */
   owner: string;
-  /** Repo name on GitHub */
+  /** Repo name from git URL */
   repo: string;
   /** PR number */
   number: number;
@@ -189,6 +211,8 @@ export interface LinkedPR {
   checksPass: boolean;
   /** Whether PR is mergeable */
   mergeable: boolean;
+  /** Hosting platform type */
+  platformType?: PlatformType;
 }
 
 /**
@@ -264,11 +288,24 @@ export interface PRMergeOptions {
 }
 
 /**
- * GitHub repository info extracted from URL
+ * Repository info extracted from URL (platform-agnostic)
+ * @deprecated Use ParsedRepoInfo from platform/types.ts instead
  */
 export interface GitHubRepoInfo {
   owner: string;
   repo: string;
+}
+
+/**
+ * Repository info extracted from git URL (platform-agnostic)
+ */
+export interface ParsedRepoInfo {
+  owner: string;
+  repo: string;
+  /** Project name (Azure DevOps only) */
+  project?: string;
+  /** Detected platform type */
+  platform?: PlatformType;
 }
 
 /**

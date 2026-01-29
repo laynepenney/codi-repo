@@ -2,7 +2,8 @@ import chalk from 'chalk';
 import ora from 'ora';
 import { loadManifest, getAllRepoInfo, getManifestRepoInfo } from '../../lib/manifest.js';
 import { pathExists, getCurrentBranch, isGitRepo } from '../../lib/git.js';
-import { findPRByBranch, getLinkedPRInfo } from '../../lib/github.js';
+import { getPlatformAdapter } from '../../lib/platform/index.js';
+import { getLinkedPRInfo } from '../../lib/linker.js';
 import type { LinkedPR } from '../../types.js';
 
 interface StatusOptions {
@@ -42,14 +43,15 @@ export async function prStatus(options: StatusOptions = {}): Promise<void> {
           return null;
         }
 
-        // Find PR for this repo's current branch
-        const pr = await findPRByBranch(repo.owner, repo.repo, branch);
+        // Find PR for this repo's current branch using the appropriate platform
+        const platform = getPlatformAdapter(repo.platformType, repo.platform);
+        const pr = await platform.findPRByBranch(repo.owner, repo.repo, branch);
         if (!pr) {
           return null;
         }
 
         // Get full PR info
-        const prInfo = await getLinkedPRInfo(repo.owner, repo.repo, pr.number, repo.name);
+        const prInfo = await getLinkedPRInfo(repo, pr.number);
         return { ...prInfo, branch };
       })
     );
@@ -60,9 +62,10 @@ export async function prStatus(options: StatusOptions = {}): Promise<void> {
     if (manifestInfo && await isGitRepo(manifestInfo.absolutePath)) {
       const manifestBranch = await getCurrentBranch(manifestInfo.absolutePath);
       if (manifestBranch !== manifestInfo.default_branch) {
-        const pr = await findPRByBranch(manifestInfo.owner, manifestInfo.repo, manifestBranch);
+        const platform = getPlatformAdapter(manifestInfo.platformType, manifestInfo.platform);
+        const pr = await platform.findPRByBranch(manifestInfo.owner, manifestInfo.repo, manifestBranch);
         if (pr) {
-          const prInfo = await getLinkedPRInfo(manifestInfo.owner, manifestInfo.repo, pr.number, manifestInfo.name);
+          const prInfo = await getLinkedPRInfo(manifestInfo, pr.number);
           manifestPR = { ...prInfo, branch: manifestBranch };
         }
       }
@@ -95,10 +98,10 @@ export async function prStatus(options: StatusOptions = {}): Promise<void> {
     // Display as table
     console.log(
       chalk.dim(
-        '  Repo                  PR        Status     Approved   Checks    Mergeable'
+        '  Repo                  PR        Status     Approved   Checks    Mergeable  Platform'
       )
     );
-    console.log(chalk.dim('  ' + '-'.repeat(76)));
+    console.log(chalk.dim('  ' + '-'.repeat(88)));
 
     for (const pr of foundPRs) {
       const repoName = pr.repoName.padEnd(20);
@@ -130,10 +133,12 @@ export async function prStatus(options: StatusOptions = {}): Promise<void> {
         : chalk.yellow('pending'.padEnd(10));
 
       const mergeable = pr.mergeable
-        ? chalk.green('✓')
-        : chalk.red('✗');
+        ? chalk.green('✓'.padEnd(10))
+        : chalk.red('✗'.padEnd(10));
 
-      console.log(`  ${repoName}  ${prNum}  ${statusText}  ${approved}  ${checks}  ${mergeable}`);
+      const platformType = (pr.platformType ?? 'github').padEnd(10);
+
+      console.log(`  ${repoName}  ${prNum}  ${statusText}  ${approved}  ${checks}  ${mergeable}  ${chalk.dim(platformType)}`);
     }
 
     // Summary

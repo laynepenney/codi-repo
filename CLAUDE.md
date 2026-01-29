@@ -117,12 +117,18 @@ src/
 └── lib/                  # Core libraries
     ├── manifest.ts       # Manifest parsing and validation
     ├── git.ts            # Git operations
-    ├── github.ts         # GitHub CLI wrapper
+    ├── github.ts         # GitHub backward compatibility (deprecated)
     ├── linker.ts         # PR-to-manifest linking
     ├── files.ts          # copyfile/linkfile operations
     ├── hooks.ts          # Post-sync/checkout hooks
     ├── scripts.ts        # Workspace script runner
-    └── timing.ts         # Benchmarking & timing utilities
+    ├── timing.ts         # Benchmarking & timing utilities
+    └── platform/         # Multi-platform hosting support
+        ├── types.ts      # Platform interfaces (HostingPlatform, etc.)
+        ├── index.ts      # Platform detection and factory
+        ├── github.ts     # GitHub adapter
+        ├── gitlab.ts     # GitLab adapter
+        └── azure-devops.ts # Azure DevOps adapter
 ```
 
 ## Key Concepts
@@ -156,6 +162,43 @@ All commands use `gr` (or `gitgrip`):
 - `copyfile`: Copy file from repo to workspace
 - `linkfile`: Create symlink from workspace to repo
 - Path validation prevents directory traversal
+
+### Multi-Platform Support
+
+gitgrip supports multiple hosting platforms:
+- **GitHub** (github.com and GitHub Enterprise)
+- **GitLab** (gitlab.com and self-hosted)
+- **Azure DevOps** (dev.azure.com and Azure DevOps Server)
+
+**Platform Detection:**
+- Platform is auto-detected from git URLs
+- Can be overridden in manifest with `platform:` config
+
+**Example mixed-platform manifest:**
+```yaml
+repos:
+  frontend:
+    url: git@github.com:org/frontend.git
+    path: ./frontend
+  backend:
+    url: git@gitlab.com:org/backend.git
+    path: ./backend
+  infra:
+    url: https://dev.azure.com/org/project/_git/infra
+    path: ./infra
+```
+
+**Platform Architecture:**
+- `HostingPlatform` interface defines all platform operations
+- Each platform has an adapter in `src/lib/platform/`
+- Use `getPlatformAdapter(type, config)` to get platform instance
+- Platform adapters handle: PR create/merge/status, reviews, status checks, URL parsing
+
+**Adding a New Platform:**
+1. Create adapter in `src/lib/platform/newplatform.ts`
+2. Implement `HostingPlatform` interface
+3. Add detection logic in `src/lib/platform/index.ts`
+4. Add tests in `src/lib/__tests__/platform.test.ts`
 
 ## Testing
 

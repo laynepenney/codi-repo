@@ -1,11 +1,39 @@
+/**
+ * GitHub API operations
+ *
+ * This module provides backward-compatible exports that delegate to the
+ * platform abstraction. For new code, prefer using the platform module directly.
+ *
+ * @deprecated Use the platform abstraction (./platform/index.js) for multi-platform support
+ */
+
+import { getGitHubPlatform, GitHubPlatform } from './platform/github.js';
 import { Octokit } from '@octokit/rest';
 import { execSync } from 'child_process';
 import type { LinkedPR, RepoInfo, PRCreateOptions, PRMergeOptions } from '../types.js';
+import type { PRReview, StatusCheckResult } from './platform/types.js';
 
+// Re-export the GitHub platform for backward compatibility
+export { getGitHubPlatform };
+
+// Singleton Octokit instance for backward compatibility with tests
 let octokitInstance: Octokit | null = null;
 
 /**
+ * Get or create Octokit instance (for backward compatibility with tests)
+ * @deprecated Use getPlatformAdapter('github') instead
+ */
+export function getOctokit(): Octokit {
+  if (!octokitInstance) {
+    const token = getGitHubToken();
+    octokitInstance = new Octokit({ auth: token });
+  }
+  return octokitInstance;
+}
+
+/**
  * Get GitHub token from environment or gh CLI
+ * @deprecated Use getPlatformAdapter('github').getToken() instead
  */
 export function getGitHubToken(): string {
   // Try environment variable first
@@ -29,18 +57,8 @@ export function getGitHubToken(): string {
 }
 
 /**
- * Get or create Octokit instance
- */
-export function getOctokit(): Octokit {
-  if (!octokitInstance) {
-    const token = getGitHubToken();
-    octokitInstance = new Octokit({ auth: token });
-  }
-  return octokitInstance;
-}
-
-/**
  * Create a pull request
+ * @deprecated Use getPlatformAdapter(repoInfo.platformType).createPullRequest() instead
  */
 export async function createPullRequest(
   owner: string,
@@ -51,25 +69,13 @@ export async function createPullRequest(
   body: string,
   draft = false
 ): Promise<{ number: number; url: string }> {
-  const octokit = getOctokit();
-  const response = await octokit.pulls.create({
-    owner,
-    repo,
-    head,
-    base,
-    title,
-    body,
-    draft,
-  });
-
-  return {
-    number: response.data.number,
-    url: response.data.html_url,
-  };
+  const platform = getGitHubPlatform();
+  return platform.createPullRequest(owner, repo, head, base, title, body, draft);
 }
 
 /**
  * Update a pull request body
+ * @deprecated Use getPlatformAdapter(repoInfo.platformType).updatePullRequestBody() instead
  */
 export async function updatePullRequestBody(
   owner: string,
@@ -77,17 +83,13 @@ export async function updatePullRequestBody(
   pullNumber: number,
   body: string
 ): Promise<void> {
-  const octokit = getOctokit();
-  await octokit.pulls.update({
-    owner,
-    repo,
-    pull_number: pullNumber,
-    body,
-  });
+  const platform = getGitHubPlatform();
+  return platform.updatePullRequestBody(owner, repo, pullNumber, body);
 }
 
 /**
  * Get pull request details
+ * @deprecated Use getPlatformAdapter(repoInfo.platformType).getPullRequest() instead
  */
 export async function getPullRequest(
   owner: string,
@@ -104,93 +106,61 @@ export async function getPullRequest(
   head: { ref: string; sha: string };
   base: { ref: string };
 }> {
-  const octokit = getOctokit();
-  const response = await octokit.pulls.get({
-    owner,
-    repo,
-    pull_number: pullNumber,
-  });
+  const platform = getGitHubPlatform();
+  const pr = await platform.getPullRequest(owner, repo, pullNumber);
+
+  // Map the platform state back to the original API's expected type
+  // (The original API doesn't include 'merged' as a state - merged is determined by the merged field)
+  const state: 'open' | 'closed' = pr.merged ? 'closed' : pr.state === 'merged' ? 'closed' : pr.state;
 
   return {
-    number: response.data.number,
-    url: response.data.html_url,
-    title: response.data.title,
-    body: response.data.body ?? '',
-    state: response.data.state as 'open' | 'closed',
-    merged: response.data.merged,
-    mergeable: response.data.mergeable,
-    head: {
-      ref: response.data.head.ref,
-      sha: response.data.head.sha,
-    },
-    base: {
-      ref: response.data.base.ref,
-    },
+    ...pr,
+    state,
   };
 }
 
 /**
  * Get reviews for a pull request
+ * @deprecated Use getPlatformAdapter(repoInfo.platformType).getPullRequestReviews() instead
  */
 export async function getPullRequestReviews(
   owner: string,
   repo: string,
   pullNumber: number
 ): Promise<{ state: string; user: string }[]> {
-  const octokit = getOctokit();
-  const response = await octokit.pulls.listReviews({
-    owner,
-    repo,
-    pull_number: pullNumber,
-  });
-
-  return response.data.map((review) => ({
-    state: review.state,
-    user: review.user?.login ?? 'unknown',
-  }));
+  const platform = getGitHubPlatform();
+  return platform.getPullRequestReviews(owner, repo, pullNumber);
 }
 
 /**
  * Check if a PR is approved
+ * @deprecated Use getPlatformAdapter(repoInfo.platformType).isPullRequestApproved() instead
  */
 export async function isPullRequestApproved(
   owner: string,
   repo: string,
   pullNumber: number
 ): Promise<boolean> {
-  const reviews = await getPullRequestReviews(owner, repo, pullNumber);
-  // Consider approved if at least one APPROVED review and no CHANGES_REQUESTED
-  const hasApproval = reviews.some((r) => r.state === 'APPROVED');
-  const hasChangesRequested = reviews.some((r) => r.state === 'CHANGES_REQUESTED');
-  return hasApproval && !hasChangesRequested;
+  const platform = getGitHubPlatform();
+  return platform.isPullRequestApproved(owner, repo, pullNumber);
 }
 
 /**
  * Get combined status checks for a PR
+ * @deprecated Use getPlatformAdapter(repoInfo.platformType).getStatusChecks() instead
  */
 export async function getStatusChecks(
   owner: string,
   repo: string,
   ref: string
 ): Promise<{ state: 'success' | 'failure' | 'pending'; statuses: { context: string; state: string }[] }> {
-  const octokit = getOctokit();
-  const response = await octokit.repos.getCombinedStatusForRef({
-    owner,
-    repo,
-    ref,
-  });
-
-  return {
-    state: response.data.state as 'success' | 'failure' | 'pending',
-    statuses: response.data.statuses.map((s) => ({
-      context: s.context,
-      state: s.state,
-    })),
-  };
+  const platform = getGitHubPlatform();
+  return platform.getStatusChecks(owner, repo, ref);
 }
 
 /**
  * Merge a pull request
+ * @deprecated Use getPlatformAdapter(repoInfo.platformType).mergePullRequest() instead
  */
 export async function mergePullRequest(
   owner: string,
@@ -198,39 +168,13 @@ export async function mergePullRequest(
   pullNumber: number,
   options: PRMergeOptions = {}
 ): Promise<boolean> {
-  const octokit = getOctokit();
-  const mergeMethod = options.method ?? 'merge';
-
-  try {
-    await octokit.pulls.merge({
-      owner,
-      repo,
-      pull_number: pullNumber,
-      merge_method: mergeMethod,
-    });
-
-    // Delete branch if requested
-    if (options.deleteBranch) {
-      const pr = await getPullRequest(owner, repo, pullNumber);
-      try {
-        await octokit.git.deleteRef({
-          owner,
-          repo,
-          ref: `heads/${pr.head.ref}`,
-        });
-      } catch {
-        // Branch deletion failure is not critical
-      }
-    }
-
-    return true;
-  } catch (error) {
-    return false;
-  }
+  const platform = getGitHubPlatform();
+  return platform.mergePullRequest(owner, repo, pullNumber, options);
 }
 
 /**
  * Get full linked PR information
+ * @deprecated Use linker.getLinkedPRInfo() with RepoInfo instead
  */
 export async function getLinkedPRInfo(
   owner: string,
@@ -238,9 +182,10 @@ export async function getLinkedPRInfo(
   pullNumber: number,
   repoName: string
 ): Promise<LinkedPR> {
-  const pr = await getPullRequest(owner, repo, pullNumber);
-  const approved = await isPullRequestApproved(owner, repo, pullNumber);
-  const checks = await getStatusChecks(owner, repo, pr.head.sha);
+  const platform = getGitHubPlatform();
+  const pr = await platform.getPullRequest(owner, repo, pullNumber);
+  const approved = await platform.isPullRequestApproved(owner, repo, pullNumber);
+  const checks = await platform.getStatusChecks(owner, repo, pr.head.sha);
 
   let state: 'open' | 'closed' | 'merged';
   if (pr.merged) {
@@ -259,36 +204,26 @@ export async function getLinkedPRInfo(
     approved,
     checksPass: checks.state === 'success',
     mergeable: pr.mergeable ?? false,
+    platformType: 'github',
   };
 }
 
 /**
  * Find PRs with a specific branch name
+ * @deprecated Use getPlatformAdapter(repoInfo.platformType).findPRByBranch() instead
  */
 export async function findPRByBranch(
   owner: string,
   repo: string,
   branch: string
 ): Promise<{ number: number; url: string } | null> {
-  const octokit = getOctokit();
-  const response = await octokit.pulls.list({
-    owner,
-    repo,
-    head: `${owner}:${branch}`,
-    state: 'open',
-  });
-
-  if (response.data.length > 0) {
-    return {
-      number: response.data[0].number,
-      url: response.data[0].html_url,
-    };
-  }
-  return null;
+  const platform = getGitHubPlatform();
+  return platform.findPRByBranch(owner, repo, branch);
 }
 
 /**
  * Create PRs for all repos with changes
+ * @deprecated Use the new multi-platform PR creation flow
  */
 export async function createLinkedPRs(
   repos: RepoInfo[],
@@ -296,11 +231,12 @@ export async function createLinkedPRs(
   options: PRCreateOptions,
   manifestPRNumber?: number
 ): Promise<LinkedPR[]> {
+  const platform = getGitHubPlatform();
   const linkedPRs: LinkedPR[] = [];
 
   for (const repo of repos) {
     // Check if PR already exists
-    const existing = await findPRByBranch(repo.owner, repo.repo, branchName);
+    const existing = await platform.findPRByBranch(repo.owner, repo.repo, branchName);
     if (existing) {
       const info = await getLinkedPRInfo(repo.owner, repo.repo, existing.number, repo.name);
       linkedPRs.push(info);
@@ -318,7 +254,7 @@ export async function createLinkedPRs(
       body = `Part of manifest PR #${manifestPRNumber}\n\n${body}`;
     }
 
-    const pr = await createPullRequest(
+    const pr = await platform.createPullRequest(
       repo.owner,
       repo.repo,
       branchName,
@@ -337,6 +273,7 @@ export async function createLinkedPRs(
 
 /**
  * Generate manifest PR body with linked PR table
+ * @deprecated Use linker.generateManifestPRBody() instead
  */
 export function generateManifestPRBody(
   title: string,
@@ -373,6 +310,7 @@ ${prTable}
 
 /**
  * Parse linked PRs from manifest PR body
+ * @deprecated Use linker.parseLinkedPRsFromBody() instead
  */
 export function parseLinkedPRsFromBody(body: string): { repoName: string; number: number }[] {
   const match = body.match(/<!-- codi-repo:links:(.+?) -->/);
