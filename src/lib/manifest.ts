@@ -448,7 +448,7 @@ export interface AddRepoConfig {
 
 /**
  * Add a repository to the manifest file
- * Note: Re-serializes the YAML, which may change formatting
+ * Preserves existing YAML comments and formatting
  */
 export async function addRepoToManifest(
   manifestPath: string,
@@ -456,24 +456,31 @@ export async function addRepoToManifest(
   config: AddRepoConfig
 ): Promise<void> {
   const content = await readFile(manifestPath, 'utf-8');
-  const manifest = YAML.parse(content) as Manifest;
+
+  // Use parseDocument to preserve comments and formatting
+  const doc = YAML.parseDocument(content);
+
+  // Get the repos node
+  const reposNode = doc.get('repos', true) as YAML.YAMLMap;
+  if (!reposNode || !(reposNode instanceof YAML.YAMLMap)) {
+    throw new Error('Invalid manifest: missing repos section');
+  }
 
   // Check if repo already exists
-  if (manifest.repos[name]) {
+  if (reposNode.has(name)) {
     throw new Error(`Repository '${name}' already exists in manifest`);
   }
 
-  // Add the new repo
-  manifest.repos[name] = {
+  // Create the new repo entry as a YAMLMap to preserve structure
+  const newRepo = doc.createNode({
     url: config.url,
     path: config.path,
     default_branch: config.default_branch,
-  };
-
-  // Write back with consistent formatting
-  const newContent = YAML.stringify(manifest, {
-    indent: 2,
-    lineWidth: 0,
   });
-  await writeFile(manifestPath, newContent, 'utf-8');
+
+  // Add the new repo to the repos map
+  reposNode.set(name, newRepo);
+
+  // Write back preserving comments
+  await writeFile(manifestPath, doc.toString(), 'utf-8');
 }
