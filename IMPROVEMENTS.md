@@ -9,11 +9,51 @@ Items here should be reviewed before creating GitHub issues.
 
 ## Pending Review
 
-_No items pending review._
+### `gr pr merge` check status messaging could be more precise
+
+**Context**: When merging PR #33, `gr pr merge` reported "checks not passing" but the actual check status was `SKIPPED` (not failed).
+
+**Current behavior**: Any non-success check status shows as "checks not passing"
+
+**Suggested improvement**: Distinguish between:
+- "checks failed" (actual failure)
+- "checks skipped" (not applicable)
+- "checks pending" (still running)
+
+This would help users understand if they're bypassing a real failure or just a non-applicable check when using `--force`.
 
 ---
 
 ## Session Reports
+
+### Multi-Platform Support Implementation (2026-01-29)
+
+**Overall Assessment**: `gr` worked smoothly for this feature. No raw `git` or `gh` commands were needed.
+
+#### What Worked Well ✅
+
+1. **`gr branch`** - Created feature branch across all repos
+2. **`gr add`, `gr commit`, `gr push`** - Smooth workflow for iterative commits
+3. **`gr pr create`** - Created PR correctly
+4. **`gr pr merge --force`** - Merged successfully
+5. **`gr checkout main && gr sync`** - Clean return to main after merge
+
+#### Issues Created
+
+| Issue | Title |
+|-------|-------|
+| #34 | feat: Add Bitbucket platform support |
+| #35 | feat: Use GitHub Check Runs API for better status checks |
+| #36 | feat: Add retry logic with exponential backoff |
+| #37 | feat: Add rate limiting handling |
+
+#### Minor Friction (No Raw Commands Needed)
+
+| Observation | Notes |
+|-------------|-------|
+| Check status messaging | `gr pr merge` showed "checks not passing" when check was actually SKIPPED. See Pending Review. |
+
+---
 
 ### Commercial Plugin Architecture Implementation (2026-01-28)
 
