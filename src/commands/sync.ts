@@ -79,50 +79,54 @@ export async function sync(options: SyncOptions = {}): Promise<void> {
   console.log(chalk.blue(`\nSyncing ${repos.length} repositories...\n`));
 
   timing?.startPhase('sync repos');
-  const results: { repo: RepoInfo; success: boolean; error?: string; branch?: string }[] = [];
 
-  for (const repo of repos) {
-    const exists = await pathExists(repo.absolutePath);
+  // Sync all repos in parallel for better performance
+  const results = await Promise.all(
+    repos.map(async (repo): Promise<{ repo: RepoInfo; success: boolean; error?: string; branch?: string }> => {
+      const exists = await pathExists(repo.absolutePath);
 
-    if (!exists) {
-      console.log(chalk.yellow(`  ${repo.name}: not cloned (run 'gitgrip init <url>')`));
-      results.push({ repo, success: false, error: 'not cloned' });
-      continue;
-    }
-
-    const spinner = ora(`${options.fetch ? 'Fetching' : 'Pulling'} ${repo.name}...`).start();
-    timing?.startPhase(repo.name);
-
-    try {
-      const branch = await getCurrentBranch(repo.absolutePath);
-
-      if (options.fetch) {
-        await fetchRemote(repo.absolutePath);
-        spinner.succeed(`${repo.name} (${chalk.cyan(branch)}): fetched`);
-      } else {
-        await pullLatest(repo.absolutePath);
-        spinner.succeed(`${repo.name} (${chalk.cyan(branch)}): pulled`);
+      if (!exists) {
+        console.log(chalk.yellow(`  ${repo.name}: not cloned (run 'gitgrip init <url>')`));
+        return { repo, success: false, error: 'not cloned' };
       }
 
-      results.push({ repo, success: true, branch });
-      timing?.endPhase(repo.name);
-    } catch (error) {
-      const errorMsg = error instanceof Error ? error.message : String(error);
+      const spinner = ora(`${options.fetch ? 'Fetching' : 'Pulling'} ${repo.name}...`).start();
+      timing?.startPhase(repo.name);
 
-      // Check for common errors
-      if (errorMsg.includes('uncommitted changes')) {
-        spinner.warn(`${repo.name}: has uncommitted changes, skipping`);
-        results.push({ repo, success: false, error: 'uncommitted changes' });
-      } else if (errorMsg.includes('diverged')) {
-        spinner.warn(`${repo.name}: branch has diverged from remote`);
-        results.push({ repo, success: false, error: 'diverged' });
-      } else {
-        spinner.fail(`${repo.name}: ${errorMsg}`);
-        results.push({ repo, success: false, error: errorMsg });
+      try {
+        const branch = await getCurrentBranch(repo.absolutePath);
+
+        if (options.fetch) {
+          await fetchRemote(repo.absolutePath);
+          spinner.succeed(`${repo.name} (${chalk.cyan(branch)}): fetched`);
+        } else {
+          await pullLatest(repo.absolutePath);
+          spinner.succeed(`${repo.name} (${chalk.cyan(branch)}): pulled`);
+        }
+
+        timing?.endPhase(repo.name);
+        return { repo, success: true, branch };
+      } catch (error) {
+        const errorMsg = error instanceof Error ? error.message : String(error);
+
+        // Check for common errors
+        if (errorMsg.includes('uncommitted changes')) {
+          spinner.warn(`${repo.name}: has uncommitted changes, skipping`);
+          timing?.endPhase(repo.name);
+          return { repo, success: false, error: 'uncommitted changes' };
+        } else if (errorMsg.includes('diverged')) {
+          spinner.warn(`${repo.name}: branch has diverged from remote`);
+          timing?.endPhase(repo.name);
+          return { repo, success: false, error: 'diverged' };
+        } else {
+          spinner.fail(`${repo.name}: ${errorMsg}`);
+          timing?.endPhase(repo.name);
+          return { repo, success: false, error: errorMsg };
+        }
       }
-      timing?.endPhase(repo.name);
-    }
-  }
+    })
+  );
+
   timing?.endPhase('sync repos');
 
   // Summary

@@ -369,3 +369,31 @@ export interface BenchmarkResult {
   /** Standard deviation in milliseconds */
   stdDev: number;
 }
+
+/**
+ * Information about a griptree (worktree-based workspace)
+ */
+export interface GriptreeInfo {
+  /** Branch name this griptree is for */
+  branch: string;
+  /** Absolute path to the griptree directory */
+  path: string;
+  /** Whether the griptree is locked (prevents accidental removal) */
+  locked: boolean;
+  /** Per-repo worktree info */
+  repos: GriptreeRepoInfo[];
+}
+
+/**
+ * Per-repo information within a griptree
+ */
+export interface GriptreeRepoInfo {
+  /** Repository name */
+  name: string;
+  /** Worktree path */
+  path: string;
+  /** Branch name */
+  branch: string;
+  /** Whether worktree exists */
+  exists: boolean;
+}

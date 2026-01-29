@@ -3,6 +3,74 @@ import { access } from 'fs/promises';
 import type { RepoInfo, RepoStatus, MultiRepoResult } from '../types.js';
 
 /**
+ * Cache entry for git status
+ */
+interface CacheEntry {
+  status: StatusResult;
+  timestamp: number;
+}
+
+/**
+ * GitStatusCache - Caches git status calls to avoid redundant operations
+ * within a single command execution
+ */
+class GitStatusCache {
+  private cache = new Map<string, CacheEntry>();
+  private ttl: number;
+
+  constructor(ttlMs = 5000) {
+    this.ttl = ttlMs;
+  }
+
+  private isExpired(entry: CacheEntry): boolean {
+    return Date.now() - entry.timestamp > this.ttl;
+  }
+
+  async getStatus(repoPath: string): Promise<StatusResult> {
+    const cached = this.cache.get(repoPath);
+    if (cached && !this.isExpired(cached)) {
+      return cached.status;
+    }
+
+    const git = getGitInstance(repoPath);
+    const status = await git.status();
+    this.cache.set(repoPath, { status, timestamp: Date.now() });
+    return status;
+  }
+
+  /**
+   * Invalidate cache for a specific repo (call after modifications)
+   */
+  invalidate(repoPath: string): void {
+    this.cache.delete(repoPath);
+  }
+
+  /**
+   * Clear the entire cache
+   */
+  clear(): void {
+    this.cache.clear();
+  }
+}
+
+// Singleton cache instance for use across commands
+export const statusCache = new GitStatusCache();
+
+/**
+ * Get cached git status for a repository
+ */
+export async function getCachedStatus(repoPath: string): Promise<StatusResult> {
+  return statusCache.getStatus(repoPath);
+}
+
+/**
+ * Invalidate cached status for a repository (call after git add, commit, etc.)
+ */
+export function invalidateStatusCache(repoPath: string): void {
+  statusCache.invalidate(repoPath);
+}
+
+/**
  * Get a SimpleGit instance for a repository
  */
 export function getGitInstance(repoPath: string): SimpleGit {

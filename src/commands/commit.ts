@@ -41,8 +41,14 @@ async function commitChanges(repoPath: string, message: string): Promise<void> {
   await git.commit(message);
 }
 
+interface RepoCommitInfo {
+  repo: RepoInfo;
+  hasStaged: boolean;
+}
+
 /**
  * Commit staged changes across all repositories
+ * Uses two-phase parallel approach for better performance
  */
 export async function commit(options: CommitOptions): Promise<void> {
   const { message, all = false } = options;
@@ -61,54 +67,59 @@ export async function commit(options: CommitOptions): Promise<void> {
     repos = [...repos, manifestInfo];
   }
 
-  const results: CommitResult[] = [];
-  let hasChanges = false;
-
   console.log(chalk.blue('Checking repositories for changes...\n'));
 
-  for (const repo of repos) {
-    const exists = await pathExists(repo.absolutePath);
-
-    if (!exists) {
-      continue;
-    }
-
-    // If --all flag, stage all changes first
-    if (all) {
-      const hasChangesToStage = await hasUncommittedChanges(repo.absolutePath);
-      if (hasChangesToStage) {
-        await stageAll(repo.absolutePath);
+  // Phase 1: Check status and optionally stage changes in parallel
+  const repoInfoResults = await Promise.all(
+    repos.map(async (repo): Promise<RepoCommitInfo | null> => {
+      const exists = await pathExists(repo.absolutePath);
+      if (!exists) {
+        return null;
       }
-    }
 
-    // Check if there are staged changes
-    const hasStaged = await hasStagedChanges(repo.absolutePath);
+      // If --all flag, stage all changes first
+      if (all) {
+        const hasChangesToStage = await hasUncommittedChanges(repo.absolutePath);
+        if (hasChangesToStage) {
+          await stageAll(repo.absolutePath);
+        }
+      }
 
-    if (!hasStaged) {
-      continue;
-    }
+      // Check if there are staged changes
+      const hasStaged = await hasStagedChanges(repo.absolutePath);
+      return { repo, hasStaged };
+    })
+  );
 
-    hasChanges = true;
-    const spinner = ora(`Committing ${repo.name}...`).start();
+  // Filter to repos with staged changes
+  const reposToCommit = repoInfoResults.filter(
+    (info): info is RepoCommitInfo => info !== null && info.hasStaged
+  );
 
-    try {
-      await commitChanges(repo.absolutePath, message);
-      spinner.succeed(`${repo.name}: committed`);
-      results.push({ repo, success: true, committed: true });
-    } catch (error) {
-      const errorMsg = error instanceof Error ? error.message : String(error);
-      spinner.fail(`${repo.name}: ${errorMsg}`);
-      results.push({ repo, success: false, committed: false, error: errorMsg });
-    }
-  }
-
-  if (!hasChanges) {
+  if (reposToCommit.length === 0) {
     console.log(chalk.yellow('No staged changes to commit in any repository.'));
     if (!all) {
       console.log(chalk.dim('Use --all to stage and commit all changes, or stage changes with git add first.'));
     }
     return;
   }
+
+  // Phase 2: Commit in parallel
+  const results = await Promise.all(
+    reposToCommit.map(async ({ repo }): Promise<CommitResult> => {
+      const spinner = ora(`Committing ${repo.name}...`).start();
+
+      try {
+        await commitChanges(repo.absolutePath, message);
+        spinner.succeed(`${repo.name}: committed`);
+        return { repo, success: true, committed: true };
+      } catch (error) {
+        const errorMsg = error instanceof Error ? error.message : String(error);
+        spinner.fail(`${repo.name}: ${errorMsg}`);
+        return { repo, success: false, committed: false, error: errorMsg };
+      }
+    })
+  );
 
   // Summary
   console.log('');
