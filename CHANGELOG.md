@@ -8,14 +8,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.4.0] - 2026-01-29
 
 ### Added
-- `gr tree` commands for worktree-based multi-branch workspaces
+- `gr tree` commands for worktree-based multi-branch workspaces (griptrees)
   - `gr tree add <branch>` - create parallel workspace on a branch
-  - `gr tree list` - show all trees
-  - `gr tree remove <branch>` - remove a tree
-  - `gr tree lock/unlock <branch>` - protect trees from removal
+  - `gr tree list` - show all griptrees
+  - `gr tree remove <branch>` - remove a griptree
+  - `gr tree lock/unlock <branch>` - protect griptrees from removal
 - `GitStatusCache` class for caching git status calls within command execution
 - CI workflow with build/test/benchmarks on Node 18, 20, 22
-- Tree documentation graphics (`assets/tree-concept.svg`, `assets/tree-workflow.svg`)
+- Griptree documentation graphics (`assets/griptree-concept.svg`, `assets/griptree-workflow.svg`)
 
 ### Changed
 - **Performance:** Parallelized `push`, `sync`, and `commit` commands using `Promise.all()`

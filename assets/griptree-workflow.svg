@@ -17,7 +17,7 @@
   <rect width="800" height="300" fill="#0F172A"/>
 
   <!-- Title -->
-  <text x="400" y="35" font-family="system-ui, -apple-system, sans-serif" font-size="20" font-weight="bold" fill="#F8FAFC" text-anchor="middle">Tree Workflow</text>
+  <text x="400" y="35" font-family="system-ui, -apple-system, sans-serif" font-size="20" font-weight="bold" fill="#F8FAFC" text-anchor="middle">Griptree Workflow</text>
 
   <!-- Step 1: Create -->
   <g transform="translate(60, 70)">
@@ -68,12 +68,12 @@
     <text x="200" y="50" font-family="system-ui, sans-serif" font-size="11" fill="#6B7280">Create parallel workspace</text>
 
     <text x="20" y="70" font-family="monospace" font-size="11" fill="#10B981">gr tree list</text>
-    <text x="200" y="70" font-family="system-ui, sans-serif" font-size="11" fill="#6B7280">Show all trees</text>
+    <text x="200" y="70" font-family="system-ui, sans-serif" font-size="11" fill="#6B7280">Show all griptrees</text>
 
     <text x="380" y="50" font-family="monospace" font-size="11" fill="#10B981">gr tree lock &lt;branch&gt;</text>
     <text x="560" y="50" font-family="system-ui, sans-serif" font-size="11" fill="#6B7280">Protect from removal</text>
 
     <text x="380" y="70" font-family="monospace" font-size="11" fill="#10B981">gr tree remove &lt;branch&gt;</text>
-    <text x="590" y="70" font-family="system-ui, sans-serif" font-size="11" fill="#6B7280">Remove worktrees</text>
+    <text x="590" y="70" font-family="system-ui, sans-serif" font-size="11" fill="#6B7280">Remove griptree</text>
   </g>
 </svg>
