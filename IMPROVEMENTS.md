@@ -45,6 +45,27 @@ _No items pending review._
 
 ---
 
+### Homebrew Tap Addition (2026-01-29)
+
+**Task**: Add homebrew-tap repo to workspace and update formula for v0.3.0
+
+#### Issues Created
+
+| Issue | Title |
+|-------|-------|
+| #43 | feat: add gr repo add command for adding new repos to workspace |
+| #44 | fix: gr sync should not discard uncommitted manifest changes |
+
+#### Raw Commands Used (Friction Log)
+
+| Raw Command | Why `gr` Couldn't Handle It | Issue |
+|-------------|----------------------------|-------|
+| `git clone git@github.com:laynepenney/homebrew-tap.git` | No command to add new repo to workspace | #43 |
+| `cd .gitgrip/manifests && git add && git commit` | Manifest changes needed manual handling after sync reset | #44 |
+| `cd homebrew-tap && git checkout -b && git push` | New repo not yet managed by gr | #43 |
+
+---
+
 ### Commercial Plugin Architecture Implementation (2026-01-28)
 
 **Overall Assessment**: `cr` worked very well for this multi-repo workflow. The core commands handled the majority of operations smoothly.
