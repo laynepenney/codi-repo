@@ -301,6 +301,10 @@ repos:
 
 Work on multiple branches simultaneously without switching. Griptrees use git worktrees to create parallel workspace directories.
 
+<p align="center">
+  <img src="assets/griptree-concept.svg" alt="Griptrees Concept" width="700">
+</p>
+
 ```bash
 # Create a griptree for a feature branch
 gr griptree add feat/new-feature
@@ -324,6 +328,10 @@ gr griptree lock feat/new-feature
 # Remove when done (branches are preserved)
 gr griptree remove feat/new-feature
 ```
+
+<p align="center">
+  <img src="assets/griptree-workflow.svg" alt="Griptree Workflow" width="700">
+</p>
 
 **Benefits:**
 - No branch switching required
