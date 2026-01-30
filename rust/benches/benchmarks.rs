@@ -592,7 +592,7 @@ fn bench_forall_command(c: &mut Criterion) {
         });
     }
 
-    // Benchmark sequential git status across repos (git2)
+    // Benchmark sequential git status across repos (git2) - simulates forall interception
     {
         let paths = repo_paths.clone();
         group.bench_function("sequential_git_status_git2", |b| {
@@ -602,6 +602,41 @@ fn bench_forall_command(c: &mut Criterion) {
                     let repo = git2::Repository::open(path).unwrap();
                     let statuses = repo.statuses(None).unwrap();
                     results.push(statuses.len());
+                }
+                black_box(results)
+            })
+        });
+    }
+
+    // Benchmark forall interception: git status --porcelain (full output formatting)
+    {
+        let paths = repo_paths.clone();
+        group.bench_function("intercepted_git_status_porcelain", |b| {
+            b.iter(|| {
+                let mut results = Vec::new();
+                for path in &paths {
+                    let repo = git2::Repository::open(path).unwrap();
+                    let statuses = repo.statuses(None).unwrap();
+
+                    // Format as porcelain (what forall interception does)
+                    let mut output = String::new();
+                    for entry in statuses.iter() {
+                        let status = entry.status();
+                        let filepath = entry.path().unwrap_or("?");
+
+                        let idx = if status.is_index_new() { 'A' }
+                            else if status.is_index_modified() { 'M' }
+                            else if status.is_index_deleted() { 'D' }
+                            else { ' ' };
+
+                        let wt = if status.is_wt_new() { '?' }
+                            else if status.is_wt_modified() { 'M' }
+                            else if status.is_wt_deleted() { 'D' }
+                            else { ' ' };
+
+                        output.push_str(&format!("{}{} {}\n", idx, wt, filepath));
+                    }
+                    results.push(output);
                 }
                 black_box(results)
             })
