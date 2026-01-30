@@ -105,6 +105,7 @@ program
   .option('-f, --force', 'Force delete even if unmerged (with -d)')
   .option('-r, --repo <repos...>', 'Only operate on specific repositories')
   .option('--include-manifest', 'Include manifest repo in branch operation')
+  .option('--move-commit <n>', 'Move N commits from current branch to new branch', parseInt)
   .action(async (name, options) => {
     try {
       if (name) {
@@ -116,6 +117,7 @@ program
           force: options.force,
           repo: options.repo,
           includeManifest: options.includeManifest,
+          moveCommit: options.moveCommit,
         });
       } else {
         await listBranches();

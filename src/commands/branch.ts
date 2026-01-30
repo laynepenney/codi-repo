@@ -16,6 +16,7 @@ import {
   deleteLocalBranch,
   deleteRemoteBranch,
   isBranchMerged,
+  resetHard,
 } from '../lib/git.js';
 import type { RepoInfo } from '../types.js';
 
@@ -27,6 +28,8 @@ interface BranchOptions {
   local?: boolean;
   remote?: boolean;
   force?: boolean;
+  /** Move N commits from current branch to new branch */
+  moveCommit?: number;
 }
 
 /**
@@ -169,6 +172,30 @@ export async function deleteBranch(branchName: string, options: BranchOptions = 
 }
 
 /**
+ * Move commits from current branch to a new branch
+ * Creates the new branch at HEAD, then resets the original branch back
+ */
+async function moveCommitsToNewBranch(
+  repoPath: string,
+  newBranchName: string,
+  commitCount: number
+): Promise<void> {
+  // Create the new branch at the current HEAD
+  await createBranch(repoPath, newBranchName);
+
+  // Get the current branch name before switching
+  const currentBranch = await getCurrentBranch(repoPath);
+
+  // Reset the current branch back by N commits
+  await resetHard(repoPath, `HEAD~${commitCount}`);
+
+  // Switch to the new branch
+  await checkoutBranch(repoPath, newBranchName);
+
+  console.log(chalk.dim(`  Moved ${commitCount} commit(s) from ${currentBranch} to ${newBranchName}`));
+}
+
+/**
  * Create or checkout a branch across all repositories
  */
 export async function branch(branchName: string, options: BranchOptions = {}): Promise<void> {
@@ -216,6 +243,44 @@ export async function branch(branchName: string, options: BranchOptions = {}): P
   const notCloned = repos.length - clonedRepos.length;
   if (notCloned > 0) {
     console.log(chalk.dim(`Skipping ${notCloned} uncloned repositories\n`));
+  }
+
+  // Handle move-commit: move N commits from current branch to new branch
+  if (options.moveCommit && options.moveCommit > 0) {
+    const commitCount = options.moveCommit;
+
+    console.log(chalk.blue(`Moving ${commitCount} commit(s) to new branch '${branchName}'...\n`));
+
+    for (const repo of clonedRepos) {
+      const spinner = ora(`${repo.name}...`).start();
+
+      try {
+        // Check for uncommitted changes
+        const hasChanges = await hasUncommittedChanges(repo.absolutePath);
+        if (hasChanges) {
+          spinner.fail(`${repo.name}: has uncommitted changes, skipping`);
+          continue;
+        }
+
+        // Check if branch already exists
+        const exists = await branchExists(repo.absolutePath, branchName);
+        if (exists) {
+          spinner.fail(`${repo.name}: branch '${branchName}' already exists`);
+          continue;
+        }
+
+        const currentBranch = await getCurrentBranch(repo.absolutePath);
+        await moveCommitsToNewBranch(repo.absolutePath, branchName, commitCount);
+        spinner.succeed(`${repo.name}: moved ${commitCount} commit(s) from ${currentBranch}`);
+      } catch (error) {
+        spinner.fail(`${repo.name}: ${error instanceof Error ? error.message : error}`);
+      }
+    }
+
+    console.log('');
+    console.log(chalk.dim(`Repos now on branch: ${branchName}`));
+    console.log(chalk.dim(`Original branches have been reset back ${commitCount} commit(s).`));
+    return;
   }
 
   // Check if we should create or checkout
