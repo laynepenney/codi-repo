@@ -276,7 +276,6 @@ impl HostingPlatform for GitHubAdapter {
             .map(|r| PRReview {
                 state: r
                     .state
-                    .clone()
                     .map(|s| format!("{:?}", s))
                     .unwrap_or_default(),
                 user: r.user.as_ref().map(|u| u.login.clone()).unwrap_or_default(),

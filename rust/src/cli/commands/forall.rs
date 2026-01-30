@@ -1027,7 +1027,7 @@ fn run_parallel(
                 success_count += 1;
             }
             Err(e) => {
-                Output::error(&format!("{}", e));
+                Output::error(&e.to_string());
                 error_count += 1;
             }
         }

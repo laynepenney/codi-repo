@@ -26,8 +26,7 @@ pub fn run_run(
                 for (name, script) in scripts {
                     let desc = script
                         .command
-                        .as_ref()
-                        .map(|c| c.as_str())
+                        .as_deref()
                         .or_else(|| script.steps.as_ref().map(|_| "[multi-step]"))
                         .unwrap_or("[no command]");
                     println!("  {} - {}", name, desc);

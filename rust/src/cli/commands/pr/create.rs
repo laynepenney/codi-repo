@@ -82,8 +82,7 @@ pub async fn run_pr_create(
             .trim_start_matches("feat/")
             .trim_start_matches("fix/")
             .trim_start_matches("chore/")
-            .replace('-', " ")
-            .replace('_', " ");
+            .replace(['-', '_'], " ");
         let mut chars = title.chars();
         match chars.next() {
             None => title,

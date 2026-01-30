@@ -200,7 +200,7 @@ pub fn upstream_branch_exists(repo: &Repository, remote: &str) -> Result<bool, G
     let upstream = get_upstream_branch(repo, None)?;
     match upstream {
         Some(name) => {
-            let branch_name = name.split('/').last().unwrap_or(&name);
+            let branch_name = name.split('/').next_back().unwrap_or(&name);
             Ok(super::branch::remote_branch_exists(
                 repo,
                 branch_name,
