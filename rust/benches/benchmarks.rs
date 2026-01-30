@@ -173,6 +173,44 @@ workspace:
     });
 }
 
+/// Benchmark git status on a repo (requires a real git repo)
+fn bench_git_status(c: &mut Criterion) {
+    use git2::Repository;
+    use gitgrip::git::status::get_status_info;
+    use tempfile::TempDir;
+    use std::fs;
+
+    // Set up a test repo
+    let temp = TempDir::new().unwrap();
+    let repo = Repository::init(temp.path()).unwrap();
+
+    // Configure and create initial commit
+    {
+        let mut config = repo.config().unwrap();
+        config.set_str("user.name", "Bench User").unwrap();
+        config.set_str("user.email", "bench@example.com").unwrap();
+    }
+    {
+        fs::write(temp.path().join("README.md"), "# Benchmark Repo").unwrap();
+        let mut index = repo.index().unwrap();
+        index.add_path(std::path::Path::new("README.md")).unwrap();
+        index.write().unwrap();
+        let sig = repo.signature().unwrap();
+        let tree_id = index.write_tree().unwrap();
+        let tree = repo.find_tree(tree_id).unwrap();
+        repo.commit(Some("HEAD"), &sig, &sig, "Initial commit", &tree, &[]).unwrap();
+    }
+
+    // Add some files to make the status more realistic
+    for i in 0..10 {
+        fs::write(temp.path().join(format!("file{}.txt", i)), format!("Content {}", i)).unwrap();
+    }
+
+    c.bench_function("git_status", |b| {
+        b.iter(|| get_status_info(black_box(&repo)).unwrap())
+    });
+}
+
 criterion_group!(
     benches,
     bench_manifest_parse,
@@ -180,6 +218,7 @@ criterion_group!(
     bench_url_parse,
     bench_url_parse_azure,
     bench_manifest_validate,
+    bench_git_status,
 );
 
 criterion_main!(benches);
