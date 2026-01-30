@@ -20,6 +20,7 @@ interface CreateOptions {
   draft?: boolean;
   base?: string;
   push?: boolean;
+  noInput?: boolean;
 }
 
 /**
@@ -149,24 +150,33 @@ export async function createPR(options: CreateOptions = {}): Promise<void> {
     }
   }
 
+  // Determine if we can prompt interactively
+  const isInteractive = process.stdin.isTTY && process.stdout.isTTY && !options.noInput;
+
   // Get PR title if not provided
   let title: string = options.title ?? '';
   if (!title) {
-    const answers = await inquirer.prompt([
-      {
-        type: 'input',
-        name: 'title',
-        message: 'PR title:',
-        default: branchName.replace(/[-_]/g, ' ').replace(/^feature\//, ''),
-        validate: (input: string) => input.length > 0 || 'Title is required',
-      },
-    ]);
-    title = answers.title as string;
+    if (isInteractive) {
+      const answers = await inquirer.prompt([
+        {
+          type: 'input',
+          name: 'title',
+          message: 'PR title:',
+          default: branchName.replace(/[-_]/g, ' ').replace(/^feature\//, ''),
+          validate: (input: string) => input.length > 0 || 'Title is required',
+        },
+      ]);
+      title = answers.title as string;
+    } else {
+      // Non-interactive: use branch name as title
+      title = branchName.replace(/[-_]/g, ' ').replace(/^(feat|fix|chore)\//, '');
+      console.log(chalk.dim(`Using title from branch: "${title}"`));
+    }
   }
 
   // Get PR body if not provided
   let body = options.body ?? '';
-  if (!body) {
+  if (!body && isInteractive) {
     const answers = await inquirer.prompt([
       {
         type: 'editor',

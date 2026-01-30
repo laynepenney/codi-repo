@@ -186,6 +186,7 @@ pr.command('create')
   .option('-d, --draft', 'Create as draft PR')
   .option('--base <branch>', 'Base branch to merge into')
   .option('--push', 'Push branches to remote if needed')
+  .option('--no-input', 'Non-interactive mode (skip prompts, use defaults)')
   .action(async (options) => {
     try {
       await createPR(options);
