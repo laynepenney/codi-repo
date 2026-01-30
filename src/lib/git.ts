@@ -235,6 +235,15 @@ export async function isBranchMerged(repoPath: string, branchName: string, targe
 }
 
 /**
+ * Reset current branch to a specific commit (hard reset)
+ */
+export async function resetHard(repoPath: string, target: string): Promise<void> {
+  const git = getGitInstance(repoPath);
+  await git.reset(['--hard', target]);
+  statusCache.invalidate(repoPath);
+}
+
+/**
  * Pull latest changes from remote
  */
 export async function pullLatest(repoPath: string, remote = 'origin'): Promise<void> {
