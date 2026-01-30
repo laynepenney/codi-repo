@@ -7,7 +7,7 @@ import { sync } from './commands/sync.js';
 import { status } from './commands/status.js';
 import { branch, listBranches } from './commands/branch.js';
 import { checkout } from './commands/checkout.js';
-import { createPR, prStatus, mergePRs } from './commands/pr/index.js';
+import { createPR, prStatus, mergePRs, prChecks } from './commands/pr/index.js';
 import { link } from './commands/link.js';
 import { run } from './commands/run.js';
 import { env } from './commands/env.js';
@@ -232,6 +232,18 @@ pr.command('merge')
         deleteBranch: options.deleteBranch,
         force: options.force,
       });
+    } catch (error) {
+      console.error(chalk.red(error instanceof Error ? error.message : String(error)));
+      process.exit(1);
+    }
+  });
+
+pr.command('checks')
+  .description('Show CI check status for PRs across all repositories')
+  .option('--json', 'Output as JSON')
+  .action(async (options) => {
+    try {
+      await prChecks(options);
     } catch (error) {
       console.error(chalk.red(error instanceof Error ? error.message : String(error)));
       process.exit(1);
