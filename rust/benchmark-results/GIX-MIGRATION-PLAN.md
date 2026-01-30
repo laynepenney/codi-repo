@@ -108,11 +108,87 @@ pub fn push_branch(...) -> Result<(), GitError> {
 - gix default for read operations
 - git2 available as `--features git2-backend`
 - CLI fallback for immature gix APIs
+- **forall git command interception** (see below)
 
 ### v0.7.0 (Future)
 - Evaluate full gix adoption
 - Remove git2 if gix status API is ready
 - Pure Rust binary (no C dependencies!)
+
+## forall Optimization: Git Command Interception
+
+### Problem
+
+`gr forall -c "git status"` currently spawns N git processes (one per repo), which is **100x slower** than using gix directly.
+
+| Command | Current (CLI) | With Interception (gix) | Speedup |
+|---------|---------------|-------------------------|---------|
+| `forall -c "git status"` | 118 ms | ~1.1 ms | **107x** |
+| `forall -c "git branch"` | ~100 ms | ~0.9 ms | **111x** |
+
+### Solution
+
+Parse the forall command and intercept known git commands:
+
+```rust
+fn run_forall_command(repos: &[RepoInfo], command: &str) -> Result<()> {
+    // Try to intercept git commands for speed
+    if let Some(optimized) = try_intercept_git_command(command) {
+        return run_optimized(repos, optimized);
+    }
+
+    // Fall back to shell execution
+    run_shell_command(repos, command)
+}
+
+fn try_intercept_git_command(command: &str) -> Option<GitCommand> {
+    let parts: Vec<&str> = command.split_whitespace().collect();
+
+    match parts.as_slice() {
+        ["git", "status"] => Some(GitCommand::Status { porcelain: false }),
+        ["git", "status", "--porcelain"] => Some(GitCommand::Status { porcelain: true }),
+        ["git", "status", "-s"] => Some(GitCommand::Status { porcelain: true }),
+        ["git", "branch"] => Some(GitCommand::ListBranches),
+        ["git", "branch", "-a"] => Some(GitCommand::ListAllBranches),
+        ["git", "rev-parse", "HEAD"] => Some(GitCommand::GetHead),
+        ["git", "rev-parse", "--abbrev-ref", "HEAD"] => Some(GitCommand::GetBranch),
+        ["git", "diff", "--stat"] => Some(GitCommand::DiffStat),
+        _ => None, // Not interceptable, use shell
+    }
+}
+```
+
+### Interceptable Commands
+
+| Pattern | Intercept | gix Operation |
+|---------|-----------|---------------|
+| `git status` | ✅ | `repo.status()` or head_id check |
+| `git status --porcelain` | ✅ | Format as porcelain |
+| `git status -s` | ✅ | Same as --porcelain |
+| `git branch` | ✅ | `repo.references().local_branches()` |
+| `git branch -a` | ✅ | Include remote branches |
+| `git rev-parse HEAD` | ✅ | `repo.head_id()` |
+| `git rev-parse --abbrev-ref HEAD` | ✅ | `repo.head_name()` |
+| `git diff --stat` | ⚠️ | May need CLI fallback |
+| `git log ...` | ❌ | Too complex, use CLI |
+| `git status \| grep ...` | ❌ | Piped, use CLI |
+| `npm test` | ❌ | Not git, use CLI |
+
+### Bypass Flag
+
+Add `--no-intercept` flag for users who need exact git output:
+
+```bash
+gr forall -c "git status"              # Uses gix (fast)
+gr forall --no-intercept -c "git status"  # Uses git CLI (exact output)
+```
+
+### Implementation Priority
+
+1. `git status` / `git status --porcelain` - Most common
+2. `git rev-parse --abbrev-ref HEAD` - Used for branch checks
+3. `git branch` - Common listing operation
+4. Others as needed
 
 ## Benefits of gix Default
 
