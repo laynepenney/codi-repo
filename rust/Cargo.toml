@@ -2,7 +2,7 @@
 name = "gitgrip"
 version = "0.5.0"
 edition = "2021"
-rust-version = "1.75"
+rust-version = "1.80"
 description = "Multi-repo workflow tool - manage multiple git repositories as one"
 license = "MIT"
 authors = ["Layne Penney"]

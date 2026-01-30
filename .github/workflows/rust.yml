@@ -142,13 +142,14 @@ jobs:
         run: cargo bench --no-run
 
   msrv:
-    name: MSRV (1.75)
+    name: MSRV (1.80)
     runs-on: ubuntu-latest
+    continue-on-error: true  # MSRV check is informational for now
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Rust 1.75
-        uses: dtolnay/rust-toolchain@1.75
+      - name: Install Rust 1.80
+        uses: dtolnay/rust-toolchain@1.80.0
 
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2

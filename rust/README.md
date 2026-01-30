@@ -177,7 +177,7 @@ rust/
 
 ### Prerequisites
 
-- Rust 1.75+ (for async traits)
+- Rust 1.80+ (stable)
 - libgit2 (for git2 crate)
 
 On macOS:
