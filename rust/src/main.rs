@@ -142,17 +142,32 @@ enum PrCommands {
         draft: bool,
     },
     /// Show PR status
-    Status,
+    Status {
+        /// Output JSON
+        #[arg(long)]
+        json: bool,
+    },
     /// Merge pull requests
     Merge {
         /// Merge method (merge, squash, rebase)
         #[arg(short, long)]
         method: Option<String>,
+        /// Force merge without readiness checks
+        #[arg(short, long)]
+        force: bool,
     },
     /// Check CI status
-    Checks,
+    Checks {
+        /// Output JSON
+        #[arg(long)]
+        json: bool,
+    },
     /// Show PR diff
-    Diff,
+    Diff {
+        /// Show stat summary only
+        #[arg(long)]
+        stat: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -257,11 +272,54 @@ async fn main() -> anyhow::Result<()> {
             let (workspace_root, manifest) = load_workspace()?;
             gitgrip::cli::commands::push::run_push(&workspace_root, &manifest, set_upstream, force)?;
         }
+        Some(Commands::Pr { action }) => {
+            let (workspace_root, manifest) = load_workspace()?;
+            match action {
+                PrCommands::Create { title, push, draft } => {
+                    gitgrip::cli::commands::pr::run_pr_create(
+                        &workspace_root,
+                        &manifest,
+                        title.as_deref(),
+                        draft,
+                        push,
+                    ).await?;
+                }
+                PrCommands::Status { json } => {
+                    gitgrip::cli::commands::pr::run_pr_status(
+                        &workspace_root,
+                        &manifest,
+                        json,
+                    ).await?;
+                }
+                PrCommands::Merge { method, force } => {
+                    gitgrip::cli::commands::pr::run_pr_merge(
+                        &workspace_root,
+                        &manifest,
+                        method.as_deref(),
+                        force,
+                    ).await?;
+                }
+                PrCommands::Checks { json } => {
+                    gitgrip::cli::commands::pr::run_pr_checks(
+                        &workspace_root,
+                        &manifest,
+                        json,
+                    ).await?;
+                }
+                PrCommands::Diff { stat } => {
+                    gitgrip::cli::commands::pr::run_pr_diff(
+                        &workspace_root,
+                        &manifest,
+                        stat,
+                    ).await?;
+                }
+            }
+        }
         Some(Commands::Bench { name, iterations }) => {
             run_benchmarks(name.as_deref(), iterations).await?;
         }
         Some(_) => {
-            println!("Command not yet implemented - coming in Phase 5-6");
+            println!("Command not yet implemented - coming in Phase 6");
         }
         None => {
             println!("gitgrip - Multi-repo workflow tool");
