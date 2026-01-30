@@ -186,3 +186,81 @@ fn has_changes(repo_path: &PathBuf) -> anyhow::Result<bool> {
         Err(_) => Ok(false),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use git2::Repository;
+    use tempfile::TempDir;
+
+    fn setup_test_repo(temp: &TempDir) -> PathBuf {
+        let repo_path = temp.path().join("repo");
+        std::fs::create_dir_all(&repo_path).unwrap();
+        let repo = Repository::init(&repo_path).unwrap();
+
+        // Configure git
+        {
+            let mut config = repo.config().unwrap();
+            config.set_str("user.name", "Test User").unwrap();
+            config.set_str("user.email", "test@example.com").unwrap();
+        }
+
+        // Create initial commit
+        {
+            std::fs::write(repo_path.join("README.md"), "# Test").unwrap();
+            let mut index = repo.index().unwrap();
+            index.add_path(std::path::Path::new("README.md")).unwrap();
+            index.write().unwrap();
+            let sig = repo.signature().unwrap();
+            let tree_id = index.write_tree().unwrap();
+            let tree = repo.find_tree(tree_id).unwrap();
+            repo.commit(Some("HEAD"), &sig, &sig, "Initial commit", &tree, &[]).unwrap();
+        }
+
+        repo_path
+    }
+
+    #[test]
+    fn test_has_changes_clean_repo() {
+        let temp = TempDir::new().unwrap();
+        let repo_path = setup_test_repo(&temp);
+
+        let result = has_changes(&repo_path);
+        assert!(result.is_ok());
+        assert!(!result.unwrap()); // Clean repo has no changes
+    }
+
+    #[test]
+    fn test_has_changes_with_modifications() {
+        let temp = TempDir::new().unwrap();
+        let repo_path = setup_test_repo(&temp);
+
+        // Modify a tracked file
+        std::fs::write(repo_path.join("README.md"), "# Modified").unwrap();
+
+        let result = has_changes(&repo_path);
+        assert!(result.is_ok());
+        assert!(result.unwrap()); // Has modifications
+    }
+
+    #[test]
+    fn test_has_changes_with_untracked_file() {
+        let temp = TempDir::new().unwrap();
+        let repo_path = setup_test_repo(&temp);
+
+        // Add untracked file
+        std::fs::write(repo_path.join("new-file.txt"), "content").unwrap();
+
+        let result = has_changes(&repo_path);
+        assert!(result.is_ok());
+        assert!(result.unwrap()); // Has untracked file
+    }
+
+    #[test]
+    fn test_has_changes_nonexistent_repo() {
+        let path = PathBuf::from("/nonexistent/path");
+        let result = has_changes(&path);
+        assert!(result.is_ok());
+        assert!(!result.unwrap()); // Returns false for non-repo
+    }
+}

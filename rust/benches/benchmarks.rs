@@ -211,6 +211,112 @@ fn bench_git_status(c: &mut Criterion) {
     });
 }
 
+/// Benchmark git branch listing
+fn bench_git_list_branches(c: &mut Criterion) {
+    use git2::Repository;
+    use tempfile::TempDir;
+    use std::fs;
+
+    // Set up a test repo with multiple branches
+    let temp = TempDir::new().unwrap();
+    let repo = Repository::init(temp.path()).unwrap();
+
+    // Configure and create initial commit
+    {
+        let mut config = repo.config().unwrap();
+        config.set_str("user.name", "Bench User").unwrap();
+        config.set_str("user.email", "bench@example.com").unwrap();
+    }
+    {
+        fs::write(temp.path().join("README.md"), "# Benchmark Repo").unwrap();
+        let mut index = repo.index().unwrap();
+        index.add_path(std::path::Path::new("README.md")).unwrap();
+        index.write().unwrap();
+        let sig = repo.signature().unwrap();
+        let tree_id = index.write_tree().unwrap();
+        let tree = repo.find_tree(tree_id).unwrap();
+        repo.commit(Some("HEAD"), &sig, &sig, "Initial commit", &tree, &[]).unwrap();
+    }
+
+    // Create several branches
+    let head = repo.head().unwrap().peel_to_commit().unwrap();
+    for i in 0..10 {
+        repo.branch(&format!("branch-{}", i), &head, false).unwrap();
+    }
+
+    c.bench_function("git_list_branches", |b| {
+        b.iter(|| {
+            let branches: Vec<_> = repo.branches(Some(git2::BranchType::Local))
+                .unwrap()
+                .collect();
+            black_box(branches.len())
+        })
+    });
+}
+
+/// Benchmark file hashing (useful for change detection)
+fn bench_file_hash(c: &mut Criterion) {
+    use std::hash::{Hash, Hasher};
+    use std::collections::hash_map::DefaultHasher;
+
+    let content = "This is some test content for hashing\n".repeat(100);
+
+    c.bench_function("file_hash_content", |b| {
+        b.iter(|| {
+            let mut hasher = DefaultHasher::new();
+            black_box(&content).hash(&mut hasher);
+            hasher.finish()
+        })
+    });
+}
+
+/// Benchmark path operations (common in file linking)
+fn bench_path_operations(c: &mut Criterion) {
+    use std::path::PathBuf;
+
+    let workspace = PathBuf::from("/home/user/workspace");
+    let repo_path = "packages/my-awesome-repo";
+
+    c.bench_function("path_join", |b| {
+        b.iter(|| {
+            let full = workspace.join(black_box(repo_path));
+            black_box(full)
+        })
+    });
+
+    let full_path = workspace.join(repo_path);
+    c.bench_function("path_canonicalize_relative", |b| {
+        b.iter(|| {
+            // This simulates normalizing relative paths
+            let path = black_box(&full_path);
+            path.components().collect::<Vec<_>>()
+        })
+    });
+}
+
+/// Benchmark regex URL parsing (for platform detection)
+fn bench_url_regex_parse(c: &mut Criterion) {
+    use regex::Regex;
+
+    let github_regex = Regex::new(r"github\.com[:/]([^/]+)/([^/\.]+)").unwrap();
+    let gitlab_regex = Regex::new(r"gitlab\.com[:/](.+)/([^/\.]+)").unwrap();
+
+    let url = "git@github.com:organization/repository-name.git";
+
+    c.bench_function("url_regex_github", |b| {
+        b.iter(|| {
+            github_regex.captures(black_box(url))
+        })
+    });
+
+    let gitlab_url = "git@gitlab.com:group/subgroup/repo.git";
+    c.bench_function("url_regex_gitlab", |b| {
+        b.iter(|| {
+            gitlab_regex.captures(black_box(gitlab_url))
+        })
+    });
+}
+
 criterion_group!(
     benches,
     bench_manifest_parse,
@@ -219,6 +325,10 @@ criterion_group!(
     bench_url_parse_azure,
     bench_manifest_validate,
     bench_git_status,
+    bench_git_list_branches,
+    bench_file_hash,
+    bench_path_operations,
+    bench_url_regex_parse,
 );
 
 criterion_main!(benches);

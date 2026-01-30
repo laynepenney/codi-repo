@@ -1,0 +1,34 @@
+Running benchmarks (iterations: 100)...
+
+
+--- Benchmark: manifest_parse ---
+Iterations: 100
+Min:    0.010ms
+Max:    0.023ms
+Avg:    0.014ms
+P50:    0.014ms
+P95:    0.019ms
+StdDev: 0.002ms
+
+--- Benchmark: state_parse ---
+Iterations: 100
+Min:    0.000ms
+Max:    0.003ms
+Avg:    0.000ms
+P50:    0.000ms
+P95:    0.001ms
+StdDev: 0.000ms
+
+--- Benchmark: url_parse ---
+Iterations: 100
+Min:    0.001ms
+Max:    0.002ms
+Avg:    0.001ms
+P50:    0.001ms
+P95:    0.001ms
+StdDev: 0.000ms
+
+=== Summary ===
+manifest_parse: avg=0.014ms, p50=0.014ms, p95=0.019ms (n=100)
+state_parse: avg=0.000ms, p50=0.000ms, p95=0.001ms (n=100)
+url_parse: avg=0.001ms, p50=0.001ms, p95=0.001ms (n=100)
