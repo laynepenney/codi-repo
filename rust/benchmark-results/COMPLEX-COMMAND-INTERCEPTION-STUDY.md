@@ -245,14 +245,89 @@ fn git_tag_list(repo: &Repository) -> Result<String, Error> {
 
 #### `git status | grep modified`
 
-**Difficulty**: Very Hard (Don't intercept)
+**Difficulty**: Medium (Can intercept!)
 
-**Why**:
-- Would need to implement shell pipe semantics
-- User expects exact git output format
-- Regex matching on our output might differ
+**Approach**: Run the git part fast, then pipe to the shell command.
 
-**Recommendation**: Never intercept piped commands.
+```rust
+fn execute_piped_command(repo_path: &Path, git_cmd: &GitCommand, pipe_to: &str) -> Result<String> {
+    // 1. Execute git command with our fast implementation
+    let git_output = execute_git_command(repo_path, git_cmd)?;
+
+    // 2. Pipe to the shell command
+    let output = Command::new("sh")
+        .arg("-c")
+        .arg(pipe_to)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()?;
+
+    // Write git output to stdin
+    output.stdin.unwrap().write_all(git_output.as_bytes())?;
+
+    // Read result
+    let result = output.wait_with_output()?;
+    Ok(String::from_utf8_lossy(&result.stdout).to_string())
+}
+```
+
+**Parsing**:
+```rust
+fn parse_piped_command(cmd: &str) -> Option<(GitCommand, String)> {
+    if let Some(pipe_pos) = cmd.find('|') {
+        let git_part = cmd[..pipe_pos].trim();
+        let pipe_part = cmd[pipe_pos + 1..].trim();
+
+        if let Some(git_cmd) = try_parse_git_command(git_part) {
+            return Some((git_cmd, pipe_part.to_string()));
+        }
+    }
+    None
+}
+
+// Examples:
+// "git status | grep modified" -> (GitCommand::Status, "grep modified")
+// "git log --oneline | head -5" -> (GitCommand::LogOneline, "head -5")
+// "git branch | wc -l" -> (GitCommand::Branch, "wc -l")
+```
+
+**Speedup**: Still get ~20-30x speedup since git execution is the bottleneck, not grep/head/wc.
+
+**Recommendation**: **Intercept piped commands!**
+
+---
+
+### 8. Redirects
+
+#### `git log > log.txt`
+
+**Difficulty**: Easy
+
+```rust
+fn execute_redirected_command(repo_path: &Path, git_cmd: &GitCommand, redirect: &str) -> Result<()> {
+    let git_output = execute_git_command(repo_path, git_cmd)?;
+
+    // Parse redirect: "> file", ">> file", "2> file", etc.
+    let (append, file_path) = if redirect.starts_with(">>") {
+        (true, redirect[2..].trim())
+    } else if redirect.starts_with(">") {
+        (false, redirect[1..].trim())
+    } else {
+        return Err("Invalid redirect".into());
+    };
+
+    let mut file = if append {
+        OpenOptions::new().append(true).create(true).open(file_path)?
+    } else {
+        File::create(file_path)?
+    };
+
+    file.write_all(git_output.as_bytes())?;
+    Ok(())
+}
+```
+
+**Recommendation**: **Intercept redirects!**
 
 ---
 
@@ -263,13 +338,18 @@ fn git_tag_list(repo: &Repository) -> Result<String, Error> {
 | `git log --oneline -N` | Medium | High | ~50x | **High** |
 | `git diff --stat` | Medium | Medium | ~30x | **High** |
 | `git diff --name-only` | Easy | Medium | ~30x | **High** |
+| `git ... \| grep/head/wc` | Medium | High | ~20x | **High** |
+| `git ... > file` | Easy | Medium | ~30x | **High** |
+| `git diff` (patch) | Medium | High | ~20x | **High** |
+| `git blame FILE` | Easy | Medium | ~30x | **High** |
 | `git stash list` | Easy | Medium | ~50x | **Medium** |
 | `git remote -v` | Easy | Low | ~50x | **Medium** |
-| `git tag` | Easy | Low | ~50x | **Low** |
-| `git show HEAD` | Medium | Low | ~30x | **Low** |
+| `git tag` | Easy | Low | ~50x | **Medium** |
+| `git show HEAD` | Medium | Low | ~30x | **Medium** |
+| `git log --graph` | Medium | Medium | ~30x | **Medium** |
+| `git shortlog` | Medium | Low | ~40x | **Low** |
 | `git log --format=...` | Hard | Low | ~50x | **Skip** |
-| `git diff` (patch) | Hard | Medium | ~20x | **Skip** |
-| Piped commands | N/A | Medium | N/A | **Never** |
+| Interactive (add -p) | N/A | Medium | N/A | **Never** |
 
 ---
 
@@ -596,15 +676,176 @@ fn execute_describe(repo: &Repository, tags: bool) -> String {
 }
 ```
 
-### Tier 4: Complex (Skip or Partial)
+### Tier 4: Advanced (Doable with Effort)
+
+#### `git log --graph`
+
+**Difficulty**: Medium-Hard (but doable)
+
+**git2 Implementation**:
+```rust
+fn git_log_graph(repo: &Repository, count: usize) -> Result<String> {
+    let mut revwalk = repo.revwalk()?;
+    revwalk.push_head()?;
+    revwalk.set_sorting(git2::Sort::TOPOLOGICAL | git2::Sort::TIME)?;
+
+    // Track active branch lines
+    let mut graph = GraphRenderer::new();
+
+    for oid in revwalk.take(count) {
+        let oid = oid?;
+        let commit = repo.find_commit(oid)?;
+        let parents: Vec<_> = commit.parents().map(|p| p.id()).collect();
+
+        // Render graph line
+        let graph_line = graph.render_commit(&oid, &parents);
+        let short_id = &oid.to_string()[..7];
+        let message = commit.summary().unwrap_or("");
+
+        output.push_str(&format!("{} {} {}\n", graph_line, short_id, message));
+    }
+    Ok(output)
+}
+
+struct GraphRenderer {
+    columns: Vec<Option<Oid>>,  // Active branch columns
+}
+
+impl GraphRenderer {
+    fn render_commit(&mut self, oid: &Oid, parents: &[Oid]) -> String {
+        // ASCII art: *, |, \, /, etc.
+        // Track merges and branches
+        // This is ~100 lines of logic
+    }
+}
+```
+
+**Why it's worth it**: `git log --graph --oneline` is very common for visualizing branches.
+
+**Recommendation**: **Implement** - Medium effort, high value.
+
+---
+
+#### `git blame FILE`
+
+**Difficulty**: Easy (git2 has full support!)
+
+**git2 Implementation**:
+```rust
+fn git_blame(repo: &Repository, file_path: &str) -> Result<String> {
+    let blame = repo.blame_file(Path::new(file_path), None)?;
+
+    let mut output = String::new();
+    for hunk in blame.iter() {
+        let commit_id = hunk.final_commit_id();
+        let short_id = &commit_id.to_string()[..8];
+        let sig = hunk.final_signature();
+        let author = sig.name().unwrap_or("?");
+
+        // Get line content from the file
+        let start_line = hunk.final_start_line();
+        let lines = hunk.lines_in_hunk();
+
+        for i in 0..lines {
+            let line_num = start_line + i;
+            // Would need to read file content for actual line text
+            output.push_str(&format!(
+                "{} ({:>10} {:>4}) {}\n",
+                short_id, author, line_num, "..."
+            ));
+        }
+    }
+    Ok(output)
+}
+```
+
+**Why**: `git blame` is slow on large files. git2's blame is often faster.
+
+**Recommendation**: **Implement** - Easy, high value for large files.
+
+---
+
+#### `git shortlog`
+
+**Difficulty**: Medium
+
+```rust
+fn git_shortlog(repo: &Repository) -> Result<String> {
+    let mut revwalk = repo.revwalk()?;
+    revwalk.push_head()?;
+
+    // Group commits by author
+    let mut by_author: HashMap<String, Vec<String>> = HashMap::new();
+
+    for oid in revwalk {
+        let commit = repo.find_commit(oid?)?;
+        let author = commit.author().name().unwrap_or("?").to_string();
+        let message = commit.summary().unwrap_or("").to_string();
+        by_author.entry(author).or_default().push(message);
+    }
+
+    // Format output
+    let mut authors: Vec<_> = by_author.into_iter().collect();
+    authors.sort_by(|a, b| b.1.len().cmp(&a.1.len()));
+
+    let mut output = String::new();
+    for (author, commits) in authors {
+        output.push_str(&format!("{} ({}):\n", author, commits.len()));
+        for msg in commits.iter().take(5) {
+            output.push_str(&format!("      {}\n", msg));
+        }
+    }
+    Ok(output)
+}
+```
+
+**Recommendation**: **Implement** - Medium effort, useful for release notes.
+
+---
+
+#### `git diff` (full patch)
+
+**Difficulty**: Medium
+
+```rust
+fn git_diff_patch(repo: &Repository, staged: bool) -> Result<String> {
+    let diff = if staged {
+        let head = repo.head()?.peel_to_tree()?;
+        repo.diff_tree_to_index(Some(&head), None, None)?
+    } else {
+        repo.diff_index_to_workdir(None, None)?
+    };
+
+    let mut output = String::new();
+    diff.print(git2::DiffFormat::Patch, |delta, _hunk, line| {
+        let prefix = match line.origin() {
+            '+' => "+",
+            '-' => "-",
+            ' ' => " ",
+            _ => "",
+        };
+        if let Ok(content) = std::str::from_utf8(line.content()) {
+            output.push_str(prefix);
+            output.push_str(content);
+        }
+        true
+    })?;
+    Ok(output)
+}
+```
+
+**Recommendation**: **Implement** - The patch format is actually well-supported by git2.
+
+---
+
+### Tier 5: Skip (Truly Complex)
 
 | Command | Issue | Recommendation |
 |---------|-------|----------------|
-| `git log --graph` | ASCII graph rendering | Skip |
-| `git log --format=...` | 40+ format codes | Skip |
-| `git diff` (full patch) | Complex formatting | Skip |
-| `git blame` | Line-by-line attribution | Skip |
-| `git shortlog` | Author grouping | Skip |
+| `git log --format=...` | 40+ format codes, conditionals | Skip |
+| `git log --pretty=...` | Same as --format | Skip |
+| `git rebase -i` | Interactive editor | Skip |
+| `git add -p` | Interactive patch selection | Skip |
 
 ---
 
@@ -687,47 +928,53 @@ fn try_parse_git_command(cmd: &str) -> Option<GitCommand> {
 
 ## Conclusion
 
-**Phase 2 should add**:
-1. `git log --oneline [-n N]` - High usage, medium effort
-2. `git diff --stat` - Common in scripts
-3. `git diff --name-only` - Easy win
+**All common git commands can be intercepted**, including:
+- Piped commands (`git status | grep foo`) - run git fast, pipe result
+- Redirects (`git log > file.txt`) - run git fast, write to file
+- Graph (`git log --graph`) - ~100 lines of ASCII rendering
+- Blame (`git blame file`) - git2 has native support
 
-**Skip for now**:
-- Full patch diff output (too complex)
-- Custom log formats (too many specifiers)
-- Piped commands (impossible to intercept correctly)
+**Only skip**:
+- Custom format strings (`git log --format="%H %s"`) - too many specifiers
+- Interactive commands (`git add -p`, `git rebase -i`)
+- Write commands (for safety)
 
-**Expected impact**: Additional 30-50x speedup for these common commands.
+**Expected impact**: 20-50x speedup for nearly all read-only git commands.
 
 ---
 
 ## Implementation Roadmap
 
-### Phase 1 (Done)
-- `git status`
-- `git branch`
-- `git rev-parse`
+### Phase 1 (Done) ✅
+- `git status [--porcelain]`
+- `git branch [-a]`
+- `git rev-parse HEAD`
 
-### Phase 2 (Next - ~8 hours)
-- `git log --oneline`
+### Phase 2 (Next - ~10 hours)
+- `git log --oneline [-n N]`
 - `git diff --stat`
 - `git diff --name-only`
+- `git diff` (full patch)
 - `git ls-files`
 - `git tag`
+- Pipe support (`git status | grep`)
+- Redirect support (`git log > file`)
 
-### Phase 3 (Later - ~6 hours)
+### Phase 3 (~8 hours)
 - `git remote -v`
 - `git stash list`
 - `git config --get`
 - `git describe`
-- `git show --stat`
+- `git show [--stat]`
+- `git blame FILE`
 
-### Phase 4 (If Needed)
+### Phase 4 (~6 hours)
+- `git log --graph`
+- `git shortlog`
 - `git reflog`
 - `git count-objects`
-- `git for-each-ref`
 
 ### Never Intercept
-- Any write command (add, commit, push, etc.)
-- Piped commands
-- Commands with complex output formatting
+- Write commands (add, commit, push, pull, merge, rebase, etc.)
+- Interactive commands (add -p, rebase -i)
+- Custom format strings (--format, --pretty)
