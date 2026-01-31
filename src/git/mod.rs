@@ -95,6 +95,12 @@ pub fn clone_repo<P: AsRef<Path>>(
     open_repo(path)
 }
 
+/// Get the working directory of a repository
+/// Works correctly for both regular repos and worktrees
+pub fn get_workdir(repo: &Repository) -> &Path {
+    repo.workdir().unwrap_or_else(|| repo.path())
+}
+
 /// Get the current branch name
 pub fn get_current_branch(repo: &Repository) -> Result<String, GitError> {
     let head = repo

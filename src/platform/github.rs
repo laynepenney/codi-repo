@@ -458,7 +458,7 @@ impl HostingPlatform for GitHubAdapter {
         let http_client = reqwest::Client::new();
 
         let user_response = http_client
-            .get(&format!("{}/user", base_url))
+            .get(format!("{}/user", base_url))
             .header("Authorization", format!("Bearer {}", token))
             .header("Accept", "application/vnd.github.v3+json")
             .header("User-Agent", "gitgrip")

@@ -55,7 +55,7 @@ pub fn get_status_info(repo: &Repository) -> Result<RepoStatusInfo, GitError> {
     let current_branch = get_current_branch(repo)?;
 
     // Use git porcelain status for reliable parsing
-    let repo_path = repo.path().parent().unwrap_or(repo.path());
+    let repo_path = super::get_workdir(repo);
 
     let output = Command::new("git")
         .args(["status", "--porcelain=v1"])

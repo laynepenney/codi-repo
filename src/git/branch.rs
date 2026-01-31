@@ -7,7 +7,7 @@ use super::{get_current_branch, GitError};
 
 /// Create a new local branch and check it out
 pub fn create_and_checkout_branch(repo: &Repository, branch_name: &str) -> Result<(), GitError> {
-    let repo_path = repo.path().parent().unwrap_or(repo.path());
+    let repo_path = super::get_workdir(repo);
 
     let output = Command::new("git")
         .args(["checkout", "-b", branch_name])
@@ -25,7 +25,7 @@ pub fn create_and_checkout_branch(repo: &Repository, branch_name: &str) -> Resul
 
 /// Checkout an existing branch
 pub fn checkout_branch(repo: &Repository, branch_name: &str) -> Result<(), GitError> {
-    let repo_path = repo.path().parent().unwrap_or(repo.path());
+    let repo_path = super::get_workdir(repo);
 
     // Check if branch exists
     if !branch_exists(repo, branch_name) {
@@ -48,7 +48,7 @@ pub fn checkout_branch(repo: &Repository, branch_name: &str) -> Result<(), GitEr
 
 /// Check if a local branch exists
 pub fn branch_exists(repo: &Repository, branch_name: &str) -> bool {
-    let repo_path = repo.path().parent().unwrap_or(repo.path());
+    let repo_path = super::get_workdir(repo);
 
     let output = Command::new("git")
         .args([
@@ -64,7 +64,7 @@ pub fn branch_exists(repo: &Repository, branch_name: &str) -> bool {
 
 /// Check if a remote branch exists
 pub fn remote_branch_exists(repo: &Repository, branch_name: &str, remote: &str) -> bool {
-    let repo_path = repo.path().parent().unwrap_or(repo.path());
+    let repo_path = super::get_workdir(repo);
 
     let output = Command::new("git")
         .args([
@@ -84,7 +84,7 @@ pub fn delete_local_branch(
     branch_name: &str,
     force: bool,
 ) -> Result<(), GitError> {
-    let repo_path = repo.path().parent().unwrap_or(repo.path());
+    let repo_path = super::get_workdir(repo);
 
     // Check if it's the current branch
     let current = get_current_branch(repo)?;
@@ -121,7 +121,7 @@ pub fn is_branch_merged(
     branch_name: &str,
     target_branch: &str,
 ) -> Result<bool, GitError> {
-    let repo_path = repo.path().parent().unwrap_or(repo.path());
+    let repo_path = super::get_workdir(repo);
 
     let output = Command::new("git")
         .args(["branch", "--merged", target_branch])
@@ -137,7 +137,7 @@ pub fn is_branch_merged(
 
 /// Get list of local branches
 pub fn list_local_branches(repo: &Repository) -> Result<Vec<String>, GitError> {
-    let repo_path = repo.path().parent().unwrap_or(repo.path());
+    let repo_path = super::get_workdir(repo);
 
     let output = Command::new("git")
         .args(["branch", "--format=%(refname:short)"])
@@ -151,7 +151,7 @@ pub fn list_local_branches(repo: &Repository) -> Result<Vec<String>, GitError> {
 
 /// Get list of remote branches
 pub fn list_remote_branches(repo: &Repository, remote: &str) -> Result<Vec<String>, GitError> {
-    let repo_path = repo.path().parent().unwrap_or(repo.path());
+    let repo_path = super::get_workdir(repo);
     let prefix = format!("{}/", remote);
 
     let output = Command::new("git")
@@ -174,7 +174,7 @@ pub fn get_commits_between(
     base_branch: &str,
     head_branch: Option<&str>,
 ) -> Result<Vec<String>, GitError> {
-    let repo_path = repo.path().parent().unwrap_or(repo.path());
+    let repo_path = super::get_workdir(repo);
 
     let head_name = match head_branch {
         Some(name) => name.to_string(),

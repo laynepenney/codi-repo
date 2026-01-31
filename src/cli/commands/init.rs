@@ -42,7 +42,15 @@ pub async fn run_init(
     private: bool,
 ) -> anyhow::Result<()> {
     if from_dirs {
-        run_init_from_dirs(path, dirs, interactive, create_manifest, manifest_name, private).await
+        run_init_from_dirs(
+            path,
+            dirs,
+            interactive,
+            create_manifest,
+            manifest_name,
+            private,
+        )
+        .await
     } else {
         run_init_from_url(url, path)
     }
@@ -205,7 +213,9 @@ async fn run_init_from_dirs(
             println!();
             Output::info(&format!(
                 "Detected platform: {} (owner: {}, confidence: {:.0}%)",
-                detected.platform, detected.owner, detected.confidence * 100.0
+                detected.platform,
+                detected.owner,
+                detected.confidence * 100.0
             ));
 
             let suggested_url = suggest_manifest_url(detected.platform, &detected.owner, repo_name);
@@ -214,7 +224,12 @@ async fn run_init_from_dirs(
             // Create the repository
             let adapter = platform::get_platform_adapter(detected.platform, None);
             match adapter
-                .create_repository(&detected.owner, repo_name, Some("Workspace manifest repository for gitgrip"), private)
+                .create_repository(
+                    &detected.owner,
+                    repo_name,
+                    Some("Workspace manifest repository for gitgrip"),
+                    private,
+                )
                 .await
             {
                 Ok(clone_url) => {
@@ -272,9 +287,7 @@ async fn run_init_from_dirs(
                 }
             }
         } else {
-            Output::warning(
-                "Could not detect platform from repositories. No remote URLs found.",
-            );
+            Output::warning("Could not detect platform from repositories. No remote URLs found.");
             Output::info("You can create the manifest repository manually and add it as a remote.");
         }
     }

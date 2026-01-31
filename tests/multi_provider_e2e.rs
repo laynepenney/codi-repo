@@ -54,8 +54,7 @@ fn gr_binary() -> std::path::PathBuf {
     assert!(status.success(), "Failed to build gr binary");
 
     // Return path to the binary
-    std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("target/debug/gr")
+    std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("target/debug/gr")
 }
 
 /// Run gr command in the given workspace directory
@@ -139,7 +138,10 @@ mod github_tests {
         clone_repo(test_repos::github::REPO2, "repo2", workspace);
 
         // Run gr init --from-dirs
-        let output = run_gr(&["init", "--from-dirs", "-p", workspace.to_str().unwrap()], workspace);
+        let output = run_gr(
+            &["init", "--from-dirs", "-p", workspace.to_str().unwrap()],
+            workspace,
+        );
 
         assert!(
             output.status.success(),
@@ -154,7 +156,10 @@ mod github_tests {
         let manifest = fs::read_to_string(&manifest_path).unwrap();
         assert!(manifest.contains("repo1"), "repo1 not in manifest");
         assert!(manifest.contains("repo2"), "repo2 not in manifest");
-        assert!(manifest.contains("github.com"), "github.com not in manifest");
+        assert!(
+            manifest.contains("github.com"),
+            "github.com not in manifest"
+        );
     }
 
     #[test]
@@ -166,7 +171,12 @@ mod github_tests {
 
         // Initialize from manifest URL
         let output = run_gr(
-            &["init", test_repos::github::MANIFEST, "-p", workspace.to_str().unwrap()],
+            &[
+                "init",
+                test_repos::github::MANIFEST,
+                "-p",
+                workspace.to_str().unwrap(),
+            ],
             &workspace,
         );
 
@@ -201,7 +211,10 @@ mod github_tests {
         clone_repo(test_repos::github::REPO2, "repo2", workspace);
 
         // Initialize workspace
-        let output = run_gr(&["init", "--from-dirs", "-p", workspace.to_str().unwrap()], workspace);
+        let output = run_gr(
+            &["init", "--from-dirs", "-p", workspace.to_str().unwrap()],
+            workspace,
+        );
         assert!(output.status.success(), "init failed");
 
         // Create branch
@@ -236,10 +249,7 @@ mod github_tests {
         );
 
         // Create PR
-        let output = run_gr_in_dir(
-            &["pr", "create", "-t", "test: E2E test PR"],
-            workspace,
-        );
+        let output = run_gr_in_dir(&["pr", "create", "-t", "test: E2E test PR"], workspace);
         assert!(
             output.status.success(),
             "pr create failed: {}",
@@ -274,7 +284,10 @@ mod github_tests {
         clone_repo(test_repos::github::REPO1, "repo1", workspace);
         clone_repo(test_repos::github::REPO2, "repo2", workspace);
 
-        let output = run_gr(&["init", "--from-dirs", "-p", workspace.to_str().unwrap()], workspace);
+        let output = run_gr(
+            &["init", "--from-dirs", "-p", workspace.to_str().unwrap()],
+            workspace,
+        );
         assert!(output.status.success());
 
         let output = run_gr_in_dir(&["status"], workspace);
@@ -314,7 +327,10 @@ mod gitlab_tests {
         clone_repo(test_repos::gitlab::REPO1, "repo1", workspace);
         clone_repo(test_repos::gitlab::REPO2, "repo2", workspace);
 
-        let output = run_gr(&["init", "--from-dirs", "-p", workspace.to_str().unwrap()], workspace);
+        let output = run_gr(
+            &["init", "--from-dirs", "-p", workspace.to_str().unwrap()],
+            workspace,
+        );
 
         assert!(
             output.status.success(),
@@ -338,7 +354,12 @@ mod gitlab_tests {
         let workspace = temp.path().join("workspace");
 
         let output = run_gr(
-            &["init", test_repos::gitlab::MANIFEST, "-p", workspace.to_str().unwrap()],
+            &[
+                "init",
+                test_repos::gitlab::MANIFEST,
+                "-p",
+                workspace.to_str().unwrap(),
+            ],
             &workspace,
         );
 
@@ -370,7 +391,10 @@ mod gitlab_tests {
         clone_repo(test_repos::gitlab::REPO1, "repo1", workspace);
         clone_repo(test_repos::gitlab::REPO2, "repo2", workspace);
 
-        let output = run_gr(&["init", "--from-dirs", "-p", workspace.to_str().unwrap()], workspace);
+        let output = run_gr(
+            &["init", "--from-dirs", "-p", workspace.to_str().unwrap()],
+            workspace,
+        );
         assert!(output.status.success());
 
         // Create branch
@@ -417,8 +441,15 @@ mod gitlab_tests {
         clone_repo(test_repos::gitlab::REPO2, "repo2", workspace);
 
         // Initialize workspace
-        let output = run_gr(&["init", "--from-dirs", "-p", workspace.to_str().unwrap()], workspace);
-        assert!(output.status.success(), "init failed: {}", String::from_utf8_lossy(&output.stderr));
+        let output = run_gr(
+            &["init", "--from-dirs", "-p", workspace.to_str().unwrap()],
+            workspace,
+        );
+        assert!(
+            output.status.success(),
+            "init failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
         println!("Init output: {}", String::from_utf8_lossy(&output.stdout));
 
         // Read and print the manifest
@@ -427,12 +458,18 @@ mod gitlab_tests {
             let manifest_content = fs::read_to_string(&manifest_path).unwrap();
             println!("Manifest content:\n{}", manifest_content);
         } else {
-            println!("WARNING: Manifest file does not exist at {:?}", manifest_path);
+            println!(
+                "WARNING: Manifest file does not exist at {:?}",
+                manifest_path
+            );
         }
 
         // Check initial status
         let output = run_gr_in_dir(&["status"], workspace);
-        println!("Initial status: {}", String::from_utf8_lossy(&output.stdout));
+        println!(
+            "Initial status: {}",
+            String::from_utf8_lossy(&output.stdout)
+        );
 
         // Create branch
         let output = run_gr_in_dir(&["branch", &branch_name], workspace);
@@ -441,7 +478,10 @@ mod gitlab_tests {
             "branch failed: {}",
             String::from_utf8_lossy(&output.stderr)
         );
-        println!("Branch created: {}", String::from_utf8_lossy(&output.stdout));
+        println!(
+            "Branch created: {}",
+            String::from_utf8_lossy(&output.stdout)
+        );
 
         // Make changes in both repos
         create_test_file(&workspace.join("repo1"), "test-file.txt");
@@ -449,11 +489,18 @@ mod gitlab_tests {
 
         // Check status after changes
         let output = run_gr_in_dir(&["status"], workspace);
-        println!("Status after changes: {}", String::from_utf8_lossy(&output.stdout));
+        println!(
+            "Status after changes: {}",
+            String::from_utf8_lossy(&output.stdout)
+        );
 
         // Stage and commit
         let output = run_gr_in_dir(&["add", "."], workspace);
-        assert!(output.status.success(), "add failed: {}", String::from_utf8_lossy(&output.stderr));
+        assert!(
+            output.status.success(),
+            "add failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
         println!("Add output: {}", String::from_utf8_lossy(&output.stdout));
 
         let output = run_gr_in_dir(&["commit", "-m", "test: gitlab e2e PR test"], workspace);
@@ -466,7 +513,10 @@ mod gitlab_tests {
 
         // Check status after commit
         let output = run_gr_in_dir(&["status"], workspace);
-        println!("Status after commit: {}", String::from_utf8_lossy(&output.stdout));
+        println!(
+            "Status after commit: {}",
+            String::from_utf8_lossy(&output.stdout)
+        );
 
         // Push
         let output = run_gr_in_dir(&["push", "-u"], workspace);
@@ -479,17 +529,32 @@ mod gitlab_tests {
 
         // Check status after push
         let output = run_gr_in_dir(&["status"], workspace);
-        println!("Status after push: {}", String::from_utf8_lossy(&output.stdout));
+        println!(
+            "Status after push: {}",
+            String::from_utf8_lossy(&output.stdout)
+        );
 
         // Debug: Check git references in repo1
         let output = git_in_repo(&["branch", "-a"], &workspace.join("repo1"));
-        println!("Git branches in repo1: {}", String::from_utf8_lossy(&output.stdout));
+        println!(
+            "Git branches in repo1: {}",
+            String::from_utf8_lossy(&output.stdout)
+        );
 
         let output = git_in_repo(&["log", "--oneline", "-5"], &workspace.join("repo1"));
-        println!("Git log in repo1: {}", String::from_utf8_lossy(&output.stdout));
+        println!(
+            "Git log in repo1: {}",
+            String::from_utf8_lossy(&output.stdout)
+        );
 
-        let output = git_in_repo(&["log", "--oneline", "-5", "origin/main"], &workspace.join("repo1"));
-        println!("Git log origin/main in repo1: {}", String::from_utf8_lossy(&output.stdout));
+        let output = git_in_repo(
+            &["log", "--oneline", "-5", "origin/main"],
+            &workspace.join("repo1"),
+        );
+        println!(
+            "Git log origin/main in repo1: {}",
+            String::from_utf8_lossy(&output.stdout)
+        );
 
         // Create PR (merge request on GitLab)
         let output = run_gr_in_dir(
@@ -505,7 +570,8 @@ mod gitlab_tests {
         assert!(
             output.status.success(),
             "pr create failed: stdout={}, stderr={}",
-            stdout, stderr
+            stdout,
+            stderr
         );
 
         // Verify PRs were created (check for actual creation, not just "PR" text)
@@ -553,7 +619,10 @@ mod azure_tests {
         clone_repo(test_repos::azure::REPO1, "repo1", workspace);
         clone_repo(test_repos::azure::REPO2, "repo2", workspace);
 
-        let output = run_gr(&["init", "--from-dirs", "-p", workspace.to_str().unwrap()], workspace);
+        let output = run_gr(
+            &["init", "--from-dirs", "-p", workspace.to_str().unwrap()],
+            workspace,
+        );
 
         assert!(
             output.status.success(),
@@ -580,7 +649,12 @@ mod azure_tests {
         let workspace = temp.path().join("workspace");
 
         let output = run_gr(
-            &["init", test_repos::azure::MANIFEST, "-p", workspace.to_str().unwrap()],
+            &[
+                "init",
+                test_repos::azure::MANIFEST,
+                "-p",
+                workspace.to_str().unwrap(),
+            ],
             &workspace,
         );
 
@@ -612,7 +686,10 @@ mod azure_tests {
         clone_repo(test_repos::azure::REPO1, "repo1", workspace);
         clone_repo(test_repos::azure::REPO2, "repo2", workspace);
 
-        let output = run_gr(&["init", "--from-dirs", "-p", workspace.to_str().unwrap()], workspace);
+        let output = run_gr(
+            &["init", "--from-dirs", "-p", workspace.to_str().unwrap()],
+            workspace,
+        );
         assert!(output.status.success());
 
         // Create branch
@@ -659,7 +736,10 @@ mod azure_tests {
         clone_repo(test_repos::azure::REPO2, "repo2", workspace);
 
         // Initialize workspace
-        let output = run_gr(&["init", "--from-dirs", "-p", workspace.to_str().unwrap()], workspace);
+        let output = run_gr(
+            &["init", "--from-dirs", "-p", workspace.to_str().unwrap()],
+            workspace,
+        );
         assert!(output.status.success(), "init failed");
 
         // Create branch
@@ -707,7 +787,8 @@ mod azure_tests {
         assert!(
             output.status.success(),
             "pr create failed: stdout={}, stderr={}",
-            stdout, stderr
+            stdout,
+            stderr
         );
 
         // Verify PRs were created (check for actual creation, not just "PR" text)
@@ -758,7 +839,10 @@ mod mixed_platform_tests {
         clone_repo(test_repos::gitlab::REPO1, "gitlab-repo", workspace);
         clone_repo(test_repos::azure::REPO1, "azure-repo", workspace);
 
-        let output = run_gr(&["init", "--from-dirs", "-p", workspace.to_str().unwrap()], workspace);
+        let output = run_gr(
+            &["init", "--from-dirs", "-p", workspace.to_str().unwrap()],
+            workspace,
+        );
 
         assert!(
             output.status.success(),
@@ -804,7 +888,10 @@ mod mixed_platform_tests {
         clone_repo(test_repos::gitlab::REPO1, "gitlab-repo", workspace);
         clone_repo(test_repos::azure::REPO1, "azure-repo", workspace);
 
-        let output = run_gr(&["init", "--from-dirs", "-p", workspace.to_str().unwrap()], workspace);
+        let output = run_gr(
+            &["init", "--from-dirs", "-p", workspace.to_str().unwrap()],
+            workspace,
+        );
         assert!(output.status.success());
 
         let output = run_gr_in_dir(&["status"], workspace);
@@ -827,7 +914,10 @@ mod mixed_platform_tests {
         clone_repo(test_repos::gitlab::REPO1, "gitlab-repo", workspace);
         clone_repo(test_repos::azure::REPO1, "azure-repo", workspace);
 
-        let output = run_gr(&["init", "--from-dirs", "-p", workspace.to_str().unwrap()], workspace);
+        let output = run_gr(
+            &["init", "--from-dirs", "-p", workspace.to_str().unwrap()],
+            workspace,
+        );
         assert!(output.status.success());
 
         // Create branch across all platforms
@@ -840,7 +930,10 @@ mod mixed_platform_tests {
 
         // Verify branch exists in each repo
         for repo_name in &["github-repo", "gitlab-repo", "azure-repo"] {
-            let output = git_in_repo(&["branch", "--list", &branch_name], &workspace.join(repo_name));
+            let output = git_in_repo(
+                &["branch", "--list", &branch_name],
+                &workspace.join(repo_name),
+            );
             let stdout = String::from_utf8_lossy(&output.stdout);
             assert!(
                 stdout.contains(&branch_name),
@@ -894,7 +987,10 @@ mod mixed_platform_tests {
         clone_repo(test_repos::github::REPO1, "github-app", workspace);
         clone_repo(test_repos::gitlab::REPO1, "gitlab-app", workspace);
 
-        let output = run_gr(&["init", "--from-dirs", "-p", workspace.to_str().unwrap()], workspace);
+        let output = run_gr(
+            &["init", "--from-dirs", "-p", workspace.to_str().unwrap()],
+            workspace,
+        );
         assert!(output.status.success());
 
         // Create branch
@@ -954,7 +1050,10 @@ mod sync_tests {
         clone_repo(test_repos::github::REPO1, "repo1", workspace);
         clone_repo(test_repos::github::REPO2, "repo2", workspace);
 
-        let output = run_gr(&["init", "--from-dirs", "-p", workspace.to_str().unwrap()], workspace);
+        let output = run_gr(
+            &["init", "--from-dirs", "-p", workspace.to_str().unwrap()],
+            workspace,
+        );
         assert!(output.status.success());
 
         // Run sync
@@ -982,7 +1081,10 @@ mod forall_tests {
         clone_repo(test_repos::github::REPO1, "repo1", workspace);
         clone_repo(test_repos::github::REPO2, "repo2", workspace);
 
-        let output = run_gr(&["init", "--from-dirs", "-p", workspace.to_str().unwrap()], workspace);
+        let output = run_gr(
+            &["init", "--from-dirs", "-p", workspace.to_str().unwrap()],
+            workspace,
+        );
         assert!(output.status.success());
 
         // Run forall with a simple command
@@ -1008,7 +1110,10 @@ mod forall_tests {
         clone_repo(test_repos::gitlab::REPO1, "gitlab-app", workspace);
         clone_repo(test_repos::azure::REPO1, "azure-app", workspace);
 
-        let output = run_gr(&["init", "--from-dirs", "-p", workspace.to_str().unwrap()], workspace);
+        let output = run_gr(
+            &["init", "--from-dirs", "-p", workspace.to_str().unwrap()],
+            workspace,
+        );
         assert!(output.status.success());
 
         // Run forall to show remote URLs
@@ -1018,9 +1123,7 @@ mod forall_tests {
         let stdout = String::from_utf8_lossy(&output.stdout);
         assert!(stdout.contains("github.com"));
         assert!(stdout.contains("gitlab.com"));
-        assert!(
-            stdout.contains("dev.azure.com") || stdout.contains("ssh.dev.azure.com")
-        );
+        assert!(stdout.contains("dev.azure.com") || stdout.contains("ssh.dev.azure.com"));
     }
 }
 

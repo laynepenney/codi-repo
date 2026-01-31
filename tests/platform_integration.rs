@@ -14,8 +14,8 @@
 
 #[cfg(feature = "integration-tests")]
 mod integration {
-    use gitgrip::platform::get_platform_adapter;
     use gitgrip::core::manifest::PlatformType;
+    use gitgrip::platform::get_platform_adapter;
     use std::env;
 
     fn random_suffix() -> String {
@@ -78,7 +78,10 @@ mod integration {
             .await
             .expect("Failed to delete repository");
 
-        println!("GitHub test passed: created and deleted {}/{}", owner, repo_name);
+        println!(
+            "GitHub test passed: created and deleted {}/{}",
+            owner, repo_name
+        );
     }
 
     #[tokio::test]
@@ -237,7 +240,10 @@ mod integration {
             .await
             .expect("Failed to delete repository");
 
-        println!("GitLab test passed: created and deleted {}/{}", owner, repo_name);
+        println!(
+            "GitLab test passed: created and deleted {}/{}",
+            owner, repo_name
+        );
     }
 
     #[tokio::test]
