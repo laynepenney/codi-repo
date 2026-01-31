@@ -4,7 +4,7 @@ use crate::cli::output::Output;
 use crate::core::manifest::Manifest;
 use crate::core::repo::RepoInfo;
 use crate::git::cache::invalidate_status_cache;
-use crate::git::{open_repo, path_exists};
+use crate::git::{get_workdir, open_repo, path_exists};
 use git2::Repository;
 use std::path::PathBuf;
 use std::process::Command;
@@ -79,7 +79,7 @@ pub fn run_commit(
 
 /// Check if a repository has staged changes using git CLI
 fn has_staged_changes(repo: &Repository) -> anyhow::Result<bool> {
-    let repo_path = repo.path().parent().unwrap_or(repo.path());
+    let repo_path = get_workdir(repo);
 
     let output = Command::new("git")
         .args(["diff", "--cached", "--quiet"])
@@ -93,7 +93,7 @@ fn has_staged_changes(repo: &Repository) -> anyhow::Result<bool> {
 
 /// Create a commit in the repository using git CLI
 fn create_commit(repo: &Repository, message: &str, amend: bool) -> anyhow::Result<String> {
-    let repo_path = repo.path().parent().unwrap_or(repo.path());
+    let repo_path = get_workdir(repo);
 
     let mut args = vec!["commit", "-m", message];
     if amend {

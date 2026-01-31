@@ -20,9 +20,7 @@ fn create_test_repo_with_remote(dir: &std::path::Path, remote_url: &str) {
         // Create a file
         let file_path = dir.join("README.md");
         fs::write(&file_path, "# Test").unwrap();
-        index
-            .add_path(std::path::Path::new("README.md"))
-            .unwrap();
+        index.add_path(std::path::Path::new("README.md")).unwrap();
         index.write().unwrap();
         index.write_tree().unwrap()
     };
@@ -149,9 +147,7 @@ fn test_init_from_dirs_handles_repos_without_remotes() {
         let mut index = repo.index().unwrap();
         let file_path = local_repo.join("README.md");
         fs::write(&file_path, "# Local").unwrap();
-        index
-            .add_path(std::path::Path::new("README.md"))
-            .unwrap();
+        index.add_path(std::path::Path::new("README.md")).unwrap();
         index.write().unwrap();
         index.write_tree().unwrap()
     };

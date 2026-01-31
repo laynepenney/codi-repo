@@ -8,7 +8,7 @@ use super::{get_current_branch, GitError};
 
 /// Get the URL of a remote
 pub fn get_remote_url(repo: &Repository, remote: &str) -> Result<Option<String>, GitError> {
-    let repo_path = repo.path().parent().unwrap_or(repo.path());
+    let repo_path = super::get_workdir(repo);
 
     let output = Command::new("git")
         .args(["remote", "get-url", remote])
@@ -26,7 +26,7 @@ pub fn get_remote_url(repo: &Repository, remote: &str) -> Result<Option<String>,
 
 /// Set the URL of a remote (creates if it doesn't exist)
 pub fn set_remote_url(repo: &Repository, remote: &str, url: &str) -> Result<(), GitError> {
-    let repo_path = repo.path().parent().unwrap_or(repo.path());
+    let repo_path = super::get_workdir(repo);
 
     if get_remote_url(repo, remote)?.is_none() {
         Command::new("git")
@@ -46,7 +46,7 @@ pub fn set_remote_url(repo: &Repository, remote: &str, url: &str) -> Result<(), 
 
 /// Fetch from remote
 pub fn fetch_remote(repo: &Repository, remote: &str) -> Result<(), GitError> {
-    let repo_path = repo.path().parent().unwrap_or(repo.path());
+    let repo_path = super::get_workdir(repo);
 
     let output = Command::new("git")
         .args(["fetch", remote])
@@ -64,7 +64,7 @@ pub fn fetch_remote(repo: &Repository, remote: &str) -> Result<(), GitError> {
 
 /// Pull latest changes (fetch + merge)
 pub fn pull_latest(repo: &Repository, remote: &str) -> Result<(), GitError> {
-    let repo_path = repo.path().parent().unwrap_or(repo.path());
+    let repo_path = super::get_workdir(repo);
 
     let output = Command::new("git")
         .args(["pull", remote])
@@ -100,7 +100,7 @@ pub fn push_branch(
     remote: &str,
     set_upstream: bool,
 ) -> Result<(), GitError> {
-    let repo_path = repo.path().parent().unwrap_or(repo.path());
+    let repo_path = super::get_workdir(repo);
 
     let mut args = vec!["push", remote, branch_name];
     if set_upstream {
@@ -127,7 +127,7 @@ pub fn force_push_branch(
     branch_name: &str,
     remote: &str,
 ) -> Result<(), GitError> {
-    let repo_path = repo.path().parent().unwrap_or(repo.path());
+    let repo_path = super::get_workdir(repo);
 
     let output = Command::new("git")
         .args(["push", "--force", remote, branch_name])
@@ -149,7 +149,7 @@ pub fn delete_remote_branch(
     branch_name: &str,
     remote: &str,
 ) -> Result<(), GitError> {
-    let repo_path = repo.path().parent().unwrap_or(repo.path());
+    let repo_path = super::get_workdir(repo);
 
     let output = Command::new("git")
         .args(["push", remote, "--delete", branch_name])
@@ -170,7 +170,7 @@ pub fn get_upstream_branch(
     repo: &Repository,
     branch_name: Option<&str>,
 ) -> Result<Option<String>, GitError> {
-    let repo_path = repo.path().parent().unwrap_or(repo.path());
+    let repo_path = super::get_workdir(repo);
 
     let branch = match branch_name {
         Some(name) => name.to_string(),
@@ -213,7 +213,7 @@ pub fn upstream_branch_exists(repo: &Repository, remote: &str) -> Result<bool, G
 
 /// Set upstream tracking for the current branch
 pub fn set_upstream_branch(repo: &Repository, remote: &str) -> Result<(), GitError> {
-    let repo_path = repo.path().parent().unwrap_or(repo.path());
+    let repo_path = super::get_workdir(repo);
     let branch_name = get_current_branch(repo)?;
 
     let output = Command::new("git")
@@ -236,7 +236,7 @@ pub fn set_upstream_branch(repo: &Repository, remote: &str) -> Result<(), GitErr
 
 /// Hard reset to a target
 pub fn reset_hard(repo: &Repository, target: &str) -> Result<(), GitError> {
-    let repo_path = repo.path().parent().unwrap_or(repo.path());
+    let repo_path = super::get_workdir(repo);
 
     let output = Command::new("git")
         .args(["reset", "--hard", target])

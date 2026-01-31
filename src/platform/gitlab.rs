@@ -208,7 +208,11 @@ impl HostingPlatform for GitLabAdapter {
             if let Some(token_match) = combined.lines().find(|l| l.contains("Token")) {
                 if let Some(token) = token_match.split_whitespace().last() {
                     // Token should start with glpat- or be a hex string
-                    if !token.is_empty() && token != "Token:" && token != "Token" && token != "found:" {
+                    if !token.is_empty()
+                        && token != "Token:"
+                        && token != "Token"
+                        && token != "found:"
+                    {
                         return Ok(token.to_string());
                     }
                 }

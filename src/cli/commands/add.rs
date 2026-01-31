@@ -4,7 +4,7 @@ use crate::cli::output::Output;
 use crate::core::manifest::Manifest;
 use crate::core::repo::RepoInfo;
 use crate::git::cache::invalidate_status_cache;
-use crate::git::{open_repo, path_exists};
+use crate::git::{get_workdir, open_repo, path_exists};
 use git2::Repository;
 use std::path::PathBuf;
 use std::process::Command;
@@ -61,7 +61,7 @@ pub fn run_add(
 
 /// Stage files in a repository using git CLI
 fn stage_files(repo: &Repository, _repo_path: &PathBuf, files: &[String]) -> anyhow::Result<usize> {
-    let repo_dir = repo.path().parent().unwrap_or(repo.path());
+    let repo_dir = get_workdir(repo);
 
     // Get count of changes before staging
     let before_output = Command::new("git")
