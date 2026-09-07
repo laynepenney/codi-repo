@@ -13,6 +13,8 @@ from __future__ import annotations
 
 import dataclasses
 import json
+import os
+import subprocess
 from pathlib import Path
 
 from gr2.prototypes import lane_workspace_prototype as lane_proto
@@ -26,6 +28,59 @@ class OpenGrReviewError(Exception):
 
 
 _RECEIPT_NAME = ".grip-open-gr.json"
+
+# open-gr's teardown marker. Distinct from _RECEIPT_NAME (the open-PROJECT receipt
+# exit-gr reads): open-gr pushes no lane and changes no cwd, so its teardown is only
+# the rm of this disposable tree, and it must NOT be mistaken for an exit-gr receipt.
+_OPEN_GR_MARKER = ".grip-open-gr-reconstruct.json"
+
+
+def write_open_gr_marker(lane_dir: Path, gr_commit: str, results: dict) -> None:
+    """Record a small teardown marker at the open-gr lane root so ``close_open_gr_lane``
+    can verify the directory is an open-gr reconstruction before removing it, rather
+    than rm an arbitrary path. ``results`` maps repo key -> the reconstruct dict."""
+    marker = {
+        "kind": "open-gr-reconstruct",
+        "gr_commit": gr_commit,
+        "repos": [
+            {
+                "key": key,
+                "reconstructed_head": res.get("reconstructed_head", ""),
+                "bound_head": res.get("bound_head", ""),
+                "bound_head_tree": res.get("bound_head_tree", ""),
+                "reconstructed_tree": res.get("reconstructed_tree", ""),
+                "tree_match": res.get("bound_head_tree") == res.get("reconstructed_tree"),
+            }
+            for key, res in results.items()
+        ],
+    }
+    (Path(lane_dir) / _OPEN_GR_MARKER).write_text(json.dumps(marker, indent=2) + "\n")
+
+
+def close_open_gr_lane(lane_dir: Path) -> dict:
+    """Reclaim an ``open-gr --enter`` reconstruction lane: verify its marker, then rm
+    the disposable tree. Refuses a directory with no open-gr marker (so a wrong
+    ``--lane-dir`` can never remove an arbitrary path). No OWNER_UNIT, no lane pop,
+    no cwd restore -- open-gr did none of those, so teardown undoes only the clone."""
+    import shutil
+
+    lane_dir = Path(lane_dir)
+    marker_path = lane_dir / _OPEN_GR_MARKER
+    if not marker_path.exists():
+        raise OpenGrReviewError(
+            f"no open-gr marker at {marker_path}; not a lane opened by "
+            "`review open-gr --enter` (refusing to remove a directory that is not "
+            "an open-gr reconstruction)"
+        )
+    marker = json.loads(marker_path.read_text())
+    if marker.get("kind") != "open-gr-reconstruct":
+        raise OpenGrReviewError(
+            f"marker at {marker_path} is not an open-gr reconstruction "
+            f"(kind={marker.get('kind')!r})"
+        )
+    gr_commit = marker.get("gr_commit", "")
+    shutil.rmtree(lane_dir, ignore_errors=True)
+    return {"reclaimed": str(lane_dir), "gr_commit": gr_commit}
 
 
 def _pin_transport_location(pin_repo: str) -> str:
@@ -71,6 +126,7 @@ def resolve_sources_from_pins(
     *,
     allow_local: bool = False,
     cache_root: Path | str | None = None,
+    local_sources: dict[str, Path | str] | None = None,
 ) -> tuple[dict[str, tuple[Path, str]], dict[str, dict[str, str]]]:
     """Resolve each source from its RECORDED REMOTE through a PERSISTENT bare mirror.
 
@@ -110,11 +166,32 @@ def resolve_sources_from_pins(
         # Serve blobless (--filter=blob:none) clones from the mirror, same as
         # review-clone.sh sets on its cache.
         git(mirror, "config", "uploadpack.allowFilter", "true")
+        # A pre-push head is ABSENT from the remote-seeded mirror BY DESIGN (a gated
+        # review head is never on the remote). If the caller names a LOCAL clone that
+        # holds it (the author's own desk has the objects), top the shared mirror up
+        # from that clone -- into a namespaced ref so the mirror's own branch names
+        # are not clobbered -- so the SAME blobless+sparse ephemeral path runs instead
+        # of falling back to a full --sources-json clone (the measured 595M harm).
+        local = local_sources.get(pin.key) if local_sources else None
+        if local is not None and git(mirror, "cat-file", "-e", f"{pin.head}^{{commit}}").returncode != 0:
+            # Fetch ONLY the pinned head (scoped to the sha, not every local branch)
+            # from the local clone, then anchor it under refs/localsrc/<key>/ so the
+            # object survives gc WITHOUT touching the mirror's own refs/heads/* -- a
+            # desk clone's stale branches must never become the shared mirror's
+            # branches. These refs/localsrc/* refs persist until gr2's next
+            # `remote update --prune` on this mirror.
+            fetched = git(mirror, "fetch", "--quiet", str(Path(local)), pin.head)
+            if fetched.returncode != 0:
+                raise OpenGrReviewError(
+                    f"cannot top up review mirror for {pin.key!r} from local source "
+                    f"{local!r}: {fetched.stderr.strip() or fetched.stdout.strip()}"
+                )
+            git(mirror, "update-ref", f"refs/localsrc/{pin.key}/head", pin.head)
         for label, sha in (("base", pin.base), ("head", pin.head)):
             if git(mirror, "cat-file", "-e", f"{sha}^{{commit}}").returncode != 0:
                 raise OpenGrReviewError(
-                    f"review mirror for {pin.key!r} does not carry {label} {sha}: the pinned "
-                    f"head must be published to the pinned remote for a remote-resolved open-gr"
+                    f"review mirror for {pin.key!r} does not carry {label} {sha}: publish the "
+                    f"pinned head to the remote, or pass a local source that holds it"
                 )
         tip = git(mirror, "rev-parse", "HEAD")
         srcmap[pin.key] = (mirror, pin.head)
@@ -145,15 +222,20 @@ def open_gr_enter(
     prior_cwd: Path | str,
     allow_local: bool = False,
     staging_dir: Path | str | None = None,
+    local_sources: dict[str, Path | str] | None = None,
 ) -> project_review.ProjectReviewOutcome:
     """Open a multi-repo review from a review-KIND gr commit and enter its lane.
 
     Refuses a non-review-kind commit (``read_project_review_commit`` rejects a
     wrong schema) BEFORE any materialization. When ``sources`` is None the source
-    transport map is RESOLVED from each pin's recorded remote (the production
-    shape: the review-kind commit is the only input, no hand-passed author-clone
-    map); a caller may still pass an explicit map (author clones for a pre-push
-    head not yet on the remote). Delegates materialization + lane enter to
+    transport map is RESOLVED from each pin's recorded remote through the shared
+    mirror and the review lane is blobless + sparse (the production shape). For a
+    PRE-PUSH head (absent on the remote by design for a gated review), pass
+    ``local_sources`` (key -> local clone holding the head): the mirror is topped up
+    from that clone and the SAME blobless + sparse path runs, so ``sources`` stays
+    None and the lane is NOT a full clone. ``sources`` (an explicit author-clone map)
+    is the older escape hatch that clones NORMALLY (full). Delegates materialization
+    + lane enter to
     ``open_project_review`` (which refuses a missing pin before it clones
     anything). On success writes the project-tier receipt naming the gr commit,
     the per-repo base/head, the prior lane, and the prior cwd for exit-restore.
@@ -169,23 +251,66 @@ def open_gr_enter(
     ]
     spec = project_review.ProjectReviewSpec("gr2-project-review/v1", gr_commit, tuple(pins))
 
-    # When sources are RESOLVED from the recorded remote, each source is the
-    # persistent bare mirror and each review lane is a blobless+sparse
-    # review-EPHEMERAL clone from it (never the work-lane clone seam). An explicit
-    # sources map (pre-push author clones) has no mirror and clones normally.
+    # Carried-range reconstruction (shape (b), self-describing commit): for each pin
+    # that carries a range, reconstruct its head from the commit alone into a scratch
+    # clone (assert TREE == the recorded head-tree), then feed that scratch as the
+    # local source. The reconstructed head is a DIFFERENT sha than the pinned head
+    # (git am re-stamps the committer), so it is what the mirror is topped up with and
+    # what the review lane materializes at, via materialize_heads -- while the gr
+    # commit stays validated against the pinned head. The review lane is still the
+    # blobless+sparse ephemeral clone; only the transient scratch is a full clone.
+    materialize_heads: dict[str, str] = {}
+    reconstructed_heads: dict[str, str] = {}
+    scratch_root: Path | None = None
+    resolve_pins = pins
+    carried = grip.project_review_carried_keys(workspace, gr_commit) if sources is None else set()
     ephemeral = False
     mirror_meta: dict[str, dict[str, str]] = {}
-    if sources is None:
-        sources, mirror_meta = resolve_sources_from_pins(
-            pins, staging_dir, allow_local=allow_local
-        )
-        ephemeral = True
+    # The scratch clone is created (mkdtemp) and populated (reconstruct) BEFORE
+    # open_project_review runs, so its removal must cover the reconstruction loop
+    # and the source resolution too -- not just the open. A range that fails to
+    # `git am` raises inside reconstruct_project_review_lane; if only the open
+    # were wrapped, that failure would leak the scratch full clone. The finally
+    # spans from mkdtemp through open so every exit path removes it.
+    try:
+        if carried:
+            import tempfile
+            scratch_root = Path(tempfile.mkdtemp(prefix="gr2-reconstruct-"))
+            local_sources = dict(local_sources or {})
+            resolve_pins = []
+            for pin in pins:
+                if pin.key in carried:
+                    res = grip.reconstruct_project_review_lane(
+                        workspace, gr_commit, pin.key, scratch_root / pin.key
+                    )
+                    rh = res["reconstructed_head"]
+                    materialize_heads[pin.key] = rh
+                    reconstructed_heads[pin.key] = rh
+                    local_sources[pin.key] = scratch_root / pin.key
+                    resolve_pins.append(dataclasses.replace(pin, head=rh))
+                else:
+                    resolve_pins.append(pin)
 
-    prior_lane = _current_lane_name(workspace, owner_unit)
-    outcome = project_review.open_project_review(
-        workspace=workspace, owner_unit=owner_unit, lane_name=lane_name,
-        spec=spec, sources=sources, allow_local=allow_local, ephemeral=ephemeral,
-    )
+        # When sources are RESOLVED from the recorded remote, each source is the
+        # persistent bare mirror and each review lane is a blobless+sparse
+        # review-EPHEMERAL clone from it (never the work-lane clone seam). An explicit
+        # sources map (pre-push author clones) has no mirror and clones normally.
+        if sources is None:
+            sources, mirror_meta = resolve_sources_from_pins(
+                resolve_pins, staging_dir, allow_local=allow_local, local_sources=local_sources
+            )
+            ephemeral = True
+
+        prior_lane = _current_lane_name(workspace, owner_unit)
+        outcome = project_review.open_project_review(
+            workspace=workspace, owner_unit=owner_unit, lane_name=lane_name,
+            spec=spec, sources=sources, allow_local=allow_local, ephemeral=ephemeral,
+            materialize_heads=materialize_heads,
+        )
+    finally:
+        if scratch_root is not None:
+            import shutil
+            shutil.rmtree(scratch_root, ignore_errors=True)
     if outcome.status != "opened" or outcome.review_root is None:
         # Refusal / partial propagates unchanged; no receipt, no enter to unwind.
         return outcome
@@ -201,6 +326,11 @@ def open_gr_enter(
         "repos": [
             {
                 "key": r["key"], "base": r["base"], "head": r["head"],
+                # For a carried-range pin the lane materializes the RECONSTRUCTED head
+                # (tree-equal to head, different sha until the committer-date lane);
+                # record it beside the pinned head so that lane has its before/after.
+                **({"reconstructed_head": reconstructed_heads[r["key"]]}
+                   if r["key"] in reconstructed_heads else {}),
                 # A reviewer can tell a stale mirror from a fresh one from these.
                 **({"mirror": mirror_meta[r["key"]]["mirror"],
                     "fetched_tip": mirror_meta[r["key"]]["fetched_tip"]}
@@ -211,6 +341,249 @@ def open_gr_enter(
     }
     open_gr_receipt_path(outcome.review_root).write_text(json.dumps(receipt, indent=2) + "\n")
     return outcome
+
+
+def provision_lane_venv(
+    lane_dir: Path, bootstrap_python: str, extras: list[str] | None = None
+) -> tuple[str, str]:
+    """Create a fresh ``.venv`` INSIDE the reviewed lane and install the repo into it
+    from its ``pyproject`` (editable), so verification runs under the LANE's OWN
+    interpreter rather than the desk's. ``bootstrap_python`` only builds the venv; the
+    RETURNED python is the one that then runs the tests, and its editable install makes
+    ``import <pkg>`` resolve to the lane checkout. Returns (venv_python, venv_bin_dir).
+
+    ``extras`` names the repo's own optional-dependency extras to install alongside the
+    editable package (``pip install -e ".[e1,e2]"``) -- the mechanism that puts a repo's
+    declared TEST dependencies (``pytest`` and what the tests import) into the lane venv,
+    so ``python -m pytest`` records a real exit 0 instead of failing on a missing
+    dependency. A fresh venv has pip but nothing else; without the extras a declared
+    ``pytest`` command records non-zero, which is the deferred gap this closes. The
+    extras come from the repo's OWN pyproject, so they resolve from wherever the repo
+    already declares them (a local path reference resolves offline).
+
+    Raises ``OpenGrReviewError`` if venv creation or the install fails."""
+    lane_dir = Path(lane_dir)
+    venv_dir = lane_dir / ".venv"
+    bin_dir = venv_dir / ("Scripts" if os.name == "nt" else "bin")
+    venv_python = bin_dir / ("python.exe" if os.name == "nt" else "python")
+    create = subprocess.run(
+        [bootstrap_python, "-m", "venv", str(venv_dir)],
+        cwd=lane_dir, text=True, capture_output=True,
+    )
+    if create.returncode != 0:
+        raise OpenGrReviewError(
+            f"lane venv creation failed in {lane_dir}: {create.stderr.strip()}"
+        )
+    # One editable install; when extras are declared they ride the SAME install so the
+    # test deps land in the venv, not the desk. A stray extra name pip cannot resolve
+    # fails the install loudly rather than silently leaving the dep absent.
+    target = "." if not extras else f".[{','.join(extras)}]"
+    install = subprocess.run(
+        [str(venv_python), "-m", "pip", "install", "-e", target],
+        cwd=lane_dir, text=True, capture_output=True,
+    )
+    if install.returncode != 0:
+        raise OpenGrReviewError(
+            f"lane venv editable install ({target}) failed in {lane_dir}: "
+            f"{install.stderr.strip()[-500:]}"
+        )
+    return str(venv_python), str(bin_dir)
+
+
+def record_review_verification(
+    review_root: Path,
+    key: str,
+    *,
+    command: list[str],
+    interpreter: str,
+    import_module: str,
+    provision_venv: bool = False,
+    extras: list[str] | None = None,
+) -> dict:
+    """Row 4 (run tests inside): run a repo's test COMMAND inside its materialized
+    review lane and append a verification record to the project-tier receipt, so
+    "the tests ran against the exact reviewed head, in the reviewed checkout, under
+    this interpreter and this package" is FRUIT in the receipt rather than a claim
+    in prose.
+
+    The record binds four things a bare "tests pass" cannot:
+
+    - ``exit_code``: the REAL subprocess return code, so a run that failed (or was
+      never invoked) cannot be recorded as green.
+    - ``head_tested``: the head the lane actually holds for this key -- the
+      reconstructed head for a carried-range pin, else the pinned head -- read from
+      the receipt, so a run against the desk worktree or dev tip cannot pass as the
+      reviewed head.
+    - ``cwd``: the materialized lane dir (``review_root/repos/<key>``), pinning the
+      run to the reviewed checkout.
+    - ``interpreter`` + ``module_path``: which python ran and which package file it
+      imported, MEASURED by a probe under the same ``interpreter`` inside the lane
+      (its real ``sys.executable`` and the imported module's ``__file__``). A stale
+      editable install can silently import a DIFFERENT desk's package; a receipt
+      that cannot say whose code it tested has the same defect one layer up. Pass
+      the interpreter that runs ``command`` so the probe measures the tests' python.
+
+    Returns the appended record. Raises ``OpenGrReviewError`` if there is no open-gr
+    receipt, the key was not materialized by this review, its lane dir is missing,
+    or the interpreter/module probe itself fails.
+    """
+    review_root = Path(review_root)
+    receipt_path = open_gr_receipt_path(review_root)
+    if not receipt_path.exists():
+        raise OpenGrReviewError(
+            f"no open-gr receipt at {receipt_path}; not a review opened by open-gr"
+        )
+    receipt = json.loads(receipt_path.read_text())
+    row = next((r for r in receipt.get("repos", []) if r["key"] == key), None)
+    if row is None:
+        raise OpenGrReviewError(
+            f"key {key!r} is not in the review receipt; cannot verify a repo the "
+            f"review did not materialize"
+        )
+    # The lane holds the reconstructed head for a carried-range pin (tree-equal to
+    # the pinned head, different sha), else the pinned head. Bind to what is on disk.
+    head_tested = row.get("reconstructed_head") or row["head"]
+    lane_dir = review_root / "repos" / key
+    if not lane_dir.is_dir():
+        raise OpenGrReviewError(
+            f"materialized lane dir missing for {key!r}: {lane_dir}"
+        )
+
+    # When the spec asks for it, provision the lane's OWN venv and run under it, so the
+    # verification interpreter is the reviewed checkout's python -- not the desk's whose
+    # editable install could import a different tree's package. `interpreter` is
+    # overridden to the lane venv python (the probe then reports IT), and the command is
+    # run with the venv's bin on PATH so its `python`/tools resolve to the lane venv too.
+    run_env = None
+    if provision_venv:
+        venv_python, venv_bin = provision_lane_venv(lane_dir, interpreter, extras=extras)
+        interpreter = venv_python
+        run_env = {
+            **os.environ,
+            "PATH": venv_bin + os.pathsep + os.environ.get("PATH", ""),
+            "VIRTUAL_ENV": str(Path(venv_bin).parent),
+        }
+
+    # Run the tests inside the reviewed checkout; capture the REAL exit code. Both
+    # this run and the probe below take the SAME `lane_dir` cwd variable, so the cwd
+    # the probe MEASURES is the cwd the tests ran under.
+    exit_code = subprocess.run(command, cwd=lane_dir, env=run_env).returncode
+
+    # Probe, under the SAME interpreter and cwd, for the python, the package file, and
+    # the working directory that actually resolve here. `cwd` is recorded from the
+    # probe's own os.getcwd() -- MEASURED, not str(lane_dir) -- so the receipt reports
+    # where the command ran rather than copying the intended path from the request; and
+    # module_path exposes (not hides) a stale editable install that reaches outside the
+    # lane.
+    probe_args = [interpreter]
+    if provision_venv:
+        # -P (3.11+) drops the cwd/'' entry from sys.path, so `import <pkg>` must
+        # resolve through the lane venv's editable install rather than through the cwd
+        # copy that a plain `python -c` puts first. Without it the editable install is
+        # untested: module_path reads "lane" even if the install never ran.
+        probe_args.append("-P")
+    probe_args += [
+        "-c",
+        "import sys, os, importlib; "
+        f"m = importlib.import_module({import_module!r}); "
+        "print(sys.executable); print(m.__file__); print(os.getcwd())",
+    ]
+    probe = subprocess.run(probe_args, cwd=lane_dir, text=True, capture_output=True)
+    if probe.returncode != 0:
+        raise OpenGrReviewError(
+            f"interpreter/module probe for {import_module!r} under {interpreter} "
+            f"failed (exit {probe.returncode}): {probe.stderr.strip()}"
+        )
+    probe_lines = probe.stdout.splitlines()
+    measured_interpreter = probe_lines[0] if probe_lines else ""
+    # DERIVE provisioned from the interpreter that actually ran, not from the request:
+    # it is true iff the python that ran is under the lane's own .venv. A copied-from-
+    # request flag would read true even if provisioning silently no-op'd.
+    provisioned = bool(measured_interpreter) and (
+        (lane_dir.resolve() / ".venv") in Path(measured_interpreter).parents
+    )
+    record = {
+        "key": key,
+        "command": list(command),
+        "exit_code": exit_code,
+        "head_tested": head_tested,
+        "cwd": probe_lines[2] if len(probe_lines) > 2 else "",
+        "interpreter": measured_interpreter,
+        "module_path": probe_lines[1] if len(probe_lines) > 1 else "",
+        "provisioned": provisioned,
+    }
+    receipt.setdefault("verification", []).append(record)
+    receipt_path.write_text(json.dumps(receipt, indent=2) + "\n")
+    return record
+
+
+def record_review_verifications(workspace: Path, review_root: Path) -> list[dict]:
+    """Row 4 follow-on (multi-repo): run EVERY reviewed repo's declared test command
+    inside its lane and record each in the receipt.
+
+    The command lives in the workspace spec, per repo, so a review of N repos runs N
+    verifications from one call rather than N hand-typed commands::
+
+        [[repos]]
+        name = "app"
+        ...
+        [repos.review_test]
+        command = ["python", "-m", "pytest", "-q"]
+        interpreter = "python3"
+        import_module = "app_pkg"
+
+    Iterates the repos the review materialized (from the receipt) and, for each that
+    declares a ``review_test``, calls ``record_review_verification`` -- which binds the
+    real exit code, the reviewed head, the measured cwd, and the interpreter/module
+    actually resolved. A repo with no declaration is skipped. Returns the records
+    appended this call, in the receipt's repo order.
+
+    Refuses if the receipt names a repo absent from the spec, if a ``review_test`` is
+    missing a required field, or if no reviewed repo declares one at all (a multi-repo
+    verify that verified nothing is a silent pass, not a result)."""
+    review_root = Path(review_root)
+    receipt_path = open_gr_receipt_path(review_root)
+    if not receipt_path.exists():
+        raise OpenGrReviewError(
+            f"no open-gr receipt at {receipt_path}; not a review opened by open-gr"
+        )
+    receipt = json.loads(receipt_path.read_text())
+    keys = [r["key"] for r in receipt.get("repos", [])]
+    spec = lane_proto.load_workspace_spec(Path(workspace))
+    by_name = {r.get("name"): r for r in spec.get("repos", [])}
+
+    records: list[dict] = []
+    for key in keys:
+        repo = by_name.get(key)
+        if repo is None:
+            raise OpenGrReviewError(
+                f"reviewed repo {key!r} is not in the workspace spec; cannot resolve "
+                f"its test command"
+            )
+        review_test = repo.get("review_test")
+        if not review_test:
+            continue
+        for field in ("command", "interpreter", "import_module"):
+            if field not in review_test:
+                raise OpenGrReviewError(
+                    f"review_test for {key!r} is missing required field {field!r}"
+                )
+        records.append(
+            record_review_verification(
+                review_root,
+                key,
+                command=list(review_test["command"]),
+                interpreter=review_test["interpreter"],
+                import_module=review_test["import_module"],
+                provision_venv=bool(review_test.get("provision_venv", False)),
+                extras=list(review_test["extras"]) if review_test.get("extras") else None,
+            )
+        )
+    if not records:
+        raise OpenGrReviewError(
+            "no reviewed repo declares a [repos.review_test] command; nothing to verify"
+        )
+    return records
 
 
 @dataclasses.dataclass(frozen=True)

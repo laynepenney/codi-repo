@@ -9,7 +9,6 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from typer.testing import CliRunner
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
@@ -25,8 +24,9 @@ from gr2.python_cli.platform import (
     PRStatus,
 )
 from gr2.python_cli.syncops import run_sync
+from tests.conftest import make_cli_runner
 
-runner = CliRunner()
+runner = make_cli_runner()
 
 
 def _merge_receipt(repo: str, number: int, method: MergeMethod) -> MergeReceipt:
@@ -979,6 +979,15 @@ def test_pr_merge_reports_partial_failure_and_preserves_state(tmp_path: Path, mo
     ]
     assert payload["failed"][0]["repo"] == "api"
     assert calls == ["app", "api"]
+
+    # Stream-channel contract, pinned by fruit rather than by the ambient click
+    # version: the UNVERIFIABLE merge-parent warning (app merged with no commit_sha)
+    # goes to STDERR, and stdout carries the JSON payload ALONE. Under click<8.2 with
+    # the default mix_stderr this exact case folded the warning onto stdout, prepended
+    # it to the JSON, and broke json.loads(result.stdout) above. Asserting the split
+    # keeps a future regression to that routing from reading as a version-specific flake.
+    assert "merge parent verification unverifiable" in result.stderr
+    assert "merge parent verification unverifiable" not in result.stdout
 
     stored = json.loads(group_path.read_text())
     assert stored["group_state"] == "partially_merged"

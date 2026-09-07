@@ -17,6 +17,7 @@ from pathlib import Path
 import pytest
 import yaml
 from typer.testing import CliRunner
+from tests.conftest import make_cli_runner
 
 from gr2.python_cli.app import app
 from gr2.python_cli import migration
@@ -27,6 +28,7 @@ from gr2.python_cli.migration import (
     migrate_gr1_workspace,
     regenerate_gr1_workspace,
     rollback_gr1_workspace,
+    render_status,
     render_workspace_spec,
     workspace_status,
 )
@@ -473,7 +475,7 @@ class TestBootstrapGr1:
         assert (grip_dir / "workspace_spec.toml").read_bytes() == expected
 
     def test_cli_reports_the_single_bootstrap_outcome(self, gr1_workspace: Path) -> None:
-        result = CliRunner().invoke(app, ["workspace", "bootstrap-gr1", str(gr1_workspace), "--json"])
+        result = make_cli_runner().invoke(app, ["workspace", "bootstrap-gr1", str(gr1_workspace), "--json"])
 
         assert result.exit_code == 0, result.stdout
         payload = json.loads(result.stdout)
@@ -879,6 +881,82 @@ class TestWorkspaceStatus:
         assert status["gr1_repo_count"] == 3
         assert status["gr2_repo_count"] == 3
 
+    def test_flags_a_real_linked_worktree(self, tmp_path: Path) -> None:
+        """The playbook has always claimed workspace status flags a
+        hand-made linked worktree the same way repo status does; until this
+        test, only repo status actually did. Real git worktree add, not a
+        synthetic fixture -- same discipline as test_repo_status_
+        linked_worktree.py's own real-worktree tests."""
+        canonical = tmp_path / "canonical"
+        canonical.mkdir()
+        subprocess.run(["git", "init", "-q"], cwd=canonical, check=True)
+        subprocess.run(["git", "config", "user.email", "dev@layne.pro"], cwd=canonical, check=True)
+        subprocess.run(["git", "config", "user.name", "Layne Penney"], cwd=canonical, check=True)
+        (canonical / "README.md").write_text("a\n")
+        subprocess.run(["git", "add", "."], cwd=canonical, check=True)
+        subprocess.run(["git", "commit", "-qm", "init"], cwd=canonical, check=True)
+
+        workspace_root = tmp_path / "workspace"
+        linked_path = workspace_root / "linked-repo"
+        result = subprocess.run(
+            ["git", "worktree", "add", "-b", "wt-branch", str(linked_path)],
+            cwd=canonical,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 0, result.stderr
+
+        grip_dir = workspace_root / ".grip"
+        grip_dir.mkdir(parents=True, exist_ok=True)
+        (grip_dir / "workspace_spec.toml").write_text(
+            'workspace_name = "test"\n\n'
+            '[[repos]]\n'
+            'name = "linked-repo"\n'
+            'path = "linked-repo"\n'
+            f'url = "file://{canonical}"\n'
+        )
+
+        status = workspace_status(workspace_root)
+        assert status["linked_worktrees"] == [str(linked_path)]
+        rendered = render_status(status)
+        assert str(linked_path) in rendered
+        assert "convert-clone" in rendered
+
+    def test_does_not_flag_an_own_clone(self, tmp_path: Path) -> None:
+        """Control: a real clone (not a linked worktree) at the same shape
+        must not be flagged."""
+        origin = tmp_path / "origin"
+        origin.mkdir()
+        subprocess.run(["git", "init", "-q"], cwd=origin, check=True)
+        subprocess.run(["git", "config", "user.email", "dev@layne.pro"], cwd=origin, check=True)
+        subprocess.run(["git", "config", "user.name", "Layne Penney"], cwd=origin, check=True)
+        (origin / "README.md").write_text("a\n")
+        subprocess.run(["git", "add", "."], cwd=origin, check=True)
+        subprocess.run(["git", "commit", "-qm", "init"], cwd=origin, check=True)
+
+        workspace_root = tmp_path / "workspace"
+        cloned_path = workspace_root / "cloned-repo"
+        cloned_path.parent.mkdir(parents=True, exist_ok=True)
+        subprocess.run(
+            ["git", "clone", "-q", str(origin), str(cloned_path)],
+            check=True, capture_output=True, text=True,
+        )
+
+        grip_dir = workspace_root / ".grip"
+        grip_dir.mkdir(parents=True, exist_ok=True)
+        (grip_dir / "workspace_spec.toml").write_text(
+            'workspace_name = "test"\n\n'
+            '[[repos]]\n'
+            'name = "cloned-repo"\n'
+            'path = "cloned-repo"\n'
+            f'url = "file://{origin}"\n'
+        )
+
+        status = workspace_status(workspace_root)
+        assert status["linked_worktrees"] == []
+        assert "convert-clone" not in render_status(status)
+
 
 # ---------------------------------------------------------------------------
 # End-to-end: detect -> migrate -> validate -> apply
@@ -1027,7 +1105,7 @@ class TestMigrateLaneState:
     def test_cli_migrate_lane_state(self, tmp_path: Path) -> None:
         _legacy_lane(tmp_path, "atlas", "feature")
         receipt = tmp_path / "cli-receipt.json"
-        result = CliRunner().invoke(app, ["workspace", "migrate-lane-state", str(tmp_path), "--receipt", str(receipt), "--json"])
+        result = make_cli_runner().invoke(app, ["workspace", "migrate-lane-state", str(tmp_path), "--receipt", str(receipt), "--json"])
         assert result.exit_code == 0, result.output
         payload = json.loads(result.output)
         assert payload["count"] == 1
