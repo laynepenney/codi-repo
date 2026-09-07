@@ -5,6 +5,96 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.0] - 2026-09-07
+
+**Scope.** This release promotes `v1.4.0..12b08f1e` — the immutable sha `12b08f1e` (the
+`dev` tip at freeze), not the moving `dev` ref: **70 commits, 35 merge commits, and 8
+first-parent units**, measured with `git rev-list --count`, `git rev-list --merges
+--count`, and `git rev-list --first-parent --count` over that exact range, with the empty
+range `v1.4.0..v1.4.0` returning 0 as the control. The release-prep commit carrying this
+entry sits one beyond that range and is excluded.
+
+**At the tag.** The release tag `v1.5.0` sits three commits beyond `12b08f1e`, so a reader
+measuring `v1.4.0..v1.5.0` gets **73 commits / 37 merges**: the promoted range plus this
+bump commit, its merge into `dev`, and the `dev`→`main` promote merge. The promoted-range
+counts above are the substantive figure; the tag-range figure is stated so a reader who
+recomputes at the tag is not surprised.
+
+**Why 8 first-parent units expand to 70 commits.** The first-parent line is short because
+unit 1 is a promote merge (#1035, `promote/dev-to-main-review-verbs`, now also `main`'s
+tip) that folds the entire review-verb, review-flow, `prune`, `target`, fixes, and CI
+stack — the 27 PRs in the `#1004`..`#1034` span, which were 27 first-parent units before
+the promote collapsed them — onto its second-parent side. The remaining 7 first-parent
+units are the post-promote gr2 packaging and review-run fixes, #1036–#1042. So the work
+below is enumerated by PR, not by first-parent unit; the two diverge here by design.
+
+**Zero of the 92 changed files touch the published Rust CLI (`src/`)**, and neither
+`Cargo.toml` nor `Cargo.lock` changed in the range — measured with `git diff --name-only
+v1.4.0..12b08f1e -- src/ Cargo.toml Cargo.lock` (0 files) and by directory (85 under `gr2/`, 2 under
+`.github/`, 2 under `scripts/`, 2 in the repo root, 1 under `tests/`). The one Rust file
+that changed, `tests/release_pipeline_contract.rs`, is a test-only integration test and
+does not enter the compiled binary. So the Rust binary published to crates.io at the tag
+is **byte-identical to 1.4.0**; this is the first grip release that changes no shipped
+Rust code. The minor bump reflects new user-facing verbs in the gr2 overlay, not a change
+to the crate. (This bump commit itself is the only edit to `Cargo.toml`/`Cargo.lock`.)
+
+### Carried by the promote merge (#1035 — PRs #1004–#1034)
+
+**The three review verbs (the R2 "Exact Work" closing fruit).** A frozen-range Python
+review through gr2 now runs end to end with no raw-shell exit point:
+- `review bind --from-range` (#1032) ingests a frozen `range.patch` directly.
+- `review close-gr` (#1033) is a verb-owned teardown for an `open-gr --enter` lane.
+- `review run` (#1034) folds the reviewer's in-lane `venv` + install + `pytest` into one
+  verb, with a two-sided tree binding (tracked-tree equality plus an untracked-drift scan)
+  and an import-under-lane check, so a green is always about the bound tree; counts come
+  from pytest's summary line and a green requires `passed >= 1`.
+
+**Review-flow infrastructure (10 PRs).** Receipt emitter (#1008); pre-push head
+materialization via the blobless+sparse path (#1009); reconstruct a pre-push head from a
+carried range (#1010); committer-faithful reconstruction so the reconstructed sha equals
+the pinned head (#1011); run reviewed tests inside the lane, recorded in the receipt
+(#1017); multi-repo verification from per-repo spec commands (#1019); provision the lane's
+own venv (#1020); end-to-end carry-range reconstruction test (#1022); install declared
+test-extras into the lane venv (#1023); print the refusal reason on default output (#1031).
+
+**prune verb stack (4 PRs).** `prune` — merged-branch cleanup by patch-id + squash,
+never containment (#1025); default target resolves dev before origin/HEAD, not silently
+main (#1026); help text (#1027); prefer the gripspace stored `[settings].target` (#1028).
+
+**target verb (2 PRs).** `target set/show/unset` — the writer for the stored PR target
+prune reads (#1029); atomicity witness — the original spec survives a failed replace (#1030).
+
+**Fixes (5 PRs).** Lane create records the fork base so review create-project works
+(#1004); workspace status flags a hand-made linked worktree (#1006); pin pr-merge `--json`
+assertions to stdout across click versions (#1015); record lane fork_base even when a
+projection hook blocks (#1016); pin that source-transport does not change review identity
+(#1021).
+
+**CI and test scaffolding (3 PRs).** Raise the Windows test-job timeout 15→30 (#1005);
+guard against a `.pyc` with no source (#1007); lift the version-safe CliRunner shim into
+one shared helper (#1018).
+
+### Post-promote fixes (first-parent units #1036–#1042)
+
+- **rmtree teardown refuses on partial failure (#1036).** A lane/review teardown that
+  cannot fully remove its tree refuses rather than leaving a half-deleted directory;
+  witnessed by `test_rmtree_or_refuse.py`.
+- **`review run` install hint (#1037).** A reviewer whose in-lane install is missing an
+  extra now gets a printed `.review-install` hint instead of a bare failure.
+- **`review run` undeclared-extra guard (#1038).** An extra named in `.review-install`
+  but not declared by the project is caught before the install runs.
+- **gr2 overlay import-package rename (#1039).** `gr2_overlay` → `gr2/overlay`, so the
+  installed import package matches the distribution layout.
+- **gr2 packaging (#1040).** A PEP 517 build backend that sources the version from
+  `Cargo.toml` (`gr2/_build/version_from_cargo.py`), a `MANIFEST.in`, and release-workflow
+  wiring to build and publish the overlay.
+- **`review run` doors (#1041).** Entry/exit guarding so `review run` and `close-gr`
+  refuse to act outside a bound lane; `test_review_run.py` + `test_review_close_gr.py`.
+- **release-pipeline contract: stale `needs:` (#1042).** The Rust contract test asserts
+  every publish job declares `needs: ci`, closing the gap the standing-stop lift opened.
+
+**Not in this range.** No spawn or graceful-shutdown fix landed in `v1.4.0..dev`.
+
 ## [1.4.0] - 2026-09-05
 
 **Scope.** This release promotes `v1.3.1..dde8c816`: **144 commits and 35 first-parent
