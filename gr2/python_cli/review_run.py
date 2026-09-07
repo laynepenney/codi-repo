@@ -26,6 +26,7 @@ import shlex
 import subprocess
 import sys
 import tempfile
+from datetime import datetime, timezone
 from pathlib import Path
 
 # An in-repo hint read when `--install` is omitted. It lives at the REPO ROOT
@@ -42,6 +43,17 @@ _HINT_NAME = ".review-install"
 
 
 _HINT_KEYS = frozenset({"install", "package"})
+
+
+def _apply_install_placeholders(tokens: list[str], venv_python: Path, repo_dir: Path) -> list[str]:
+    """Substitute `{venv}` and `{lane}` per token, so a lane path containing a space
+    stays one token (substituting before shell-splitting would let the space break the
+    token apart). The single substitution point shared by the --install flag and the
+    .review-install hint, so both accept the identical template (review-run door 2)."""
+    return [
+        tok.replace("{venv}", str(venv_python)).replace("{lane}", str(repo_dir))
+        for tok in tokens
+    ]
 
 
 def read_install_hint(repo_dir: Path) -> dict | None:
@@ -71,6 +83,11 @@ def read_install_hint(repo_dir: Path) -> dict | None:
 
 _MARKER_NAME = ".grip-open-gr-reconstruct.json"
 _RECEIPT_NAME = ".grip-review-run.json"
+# The full pytest output, persisted beside the receipt. The receipt's counts and
+# `failed_ids` say WHAT failed; this file is the raw text a reviewer reads to see
+# WHY. Named so `close-gr` can carry it (and the receipt) out before it reclaims
+# the lane (review-run door 1).
+_OUTPUT_LOG_NAME = ".grip-review-run.log"
 _VENV_DIRNAME = ".venv"
 
 
@@ -303,6 +320,78 @@ def parse_pytest_summary(stdout: str) -> dict | None:
     }
 
 
+# ---- failed-test node ids (which tests failed, not just how many) -----------
+
+# pytest's short test summary info section (emitted under `-rfE`, which the run
+# always passes) lists one line per non-passing outcome:
+#   FAILED tests/test_x.py::test_bad - AssertionError: ...
+#   FAILED tests/test_x.py::test_p[case 2 with spaces] - AssertionError
+#   ERROR tests/test_x.py::test_y - fixture 'conn' not found   (setup/collection)
+# The node id is everything between the status word and pytest's ` - <message>`
+# separator (space-dash-space), or the rest of the line when there is no message.
+# A `\S+` token would truncate a PARAMETRIZED id at the first space inside its
+# brackets, losing the exact case a reviewer must re-run — so match to the ` - `
+# instead. Anchored at line start (MULTILINE) so the `ERRORS` banner and the
+# `___ ERROR at setup of ___` divider lines, which do not start with the word, are
+# not mistaken for summary rows. review-run door 1: the 35 env failures in the
+# real review were unrecoverable from the receipt because this was never captured.
+# Known edge: a param whose brackets literally contain " - " (space-dash-space)
+# truncates there, since that is also the id/message separator; pytest usually
+# sanitizes such ids and the truncation still keeps the file and test stem, so it
+# is accepted rather than guarded.
+_FAILED_ID_RE = re.compile(r"^(?:FAILED|ERROR)\s+(.+?)(?: - .*)?$", re.MULTILINE)
+
+
+def parse_failed_ids(output: str) -> list[str]:
+    """Return the sorted unique node ids pytest reported as FAILED or ERROR in
+    `output`'s short test summary. A count of failures with no ids is a dead end
+    for a reviewer; this is the path back to the exact tests to re-run."""
+    return sorted({m.group(1) for m in _FAILED_ID_RE.finditer(output)})
+
+
+def merge_report_flags(pytest_args: list[str]) -> list[str]:
+    """Return `pytest_args` with a single `-r` spec GUARANTEED to make the short test
+    summary list every FAILED and ERROR node id for parse_failed_ids.
+
+    Two pytest facts drive this and neither is `-r`-is-additive:
+      * `-r` is LAST-WINS across tokens, so a prepended `-rfE` is silently overridden
+        by any later caller `-r` — failed_ids then comes back EMPTY on a real red run.
+      * within one `-r` spec, the chars are processed IN ORDER and `N` (none) CLEARS
+        everything before it. So a sorted union like `-rENf` loses ERROR: E is added,
+        N clears it, f is added — a red run with an ERROR-at-setup keeps FAILED and
+        drops the ERROR ids. (Measured: `-rfE` prints both, `-rENf` FAILED only.)
+
+    So: collect the caller's `-r` chars in ORDER (deduped), DROP `N` (the run requires
+    output, so "none" cannot stand), drop any caller f/E, then append `f` and `E` LAST
+    so nothing that follows can clear them. `a`/`A` (all / all-but-passed) stay, ahead
+    of f/E, and are harmless supersets."""
+    required = ("f", "E")
+    caller_seq: list[str] = []
+    seen: set[str] = set()
+    rest: list[str] = []
+    i = 0
+    while i < len(pytest_args):
+        a = pytest_args[i]
+        chars: str | None = None
+        if a == "-r" and i + 1 < len(pytest_args):  # `-r fE` (separate arg)
+            chars = pytest_args[i + 1]
+            i += 2
+        elif a.startswith("-r") and len(a) > 2:  # `-rfE` (attached)
+            chars = a[2:]
+            i += 1
+        else:
+            rest.append(a)
+            i += 1
+            continue
+        for c in chars:
+            if c not in seen:
+                seen.add(c)
+                caller_seq.append(c)
+    ordered = [c for c in caller_seq if c not in ("N", *required)]
+    ordered.extend(required)
+    return ["-r" + "".join(ordered), *rest]
+
+
 # ---- the verb ---------------------------------------------------------------
 
 def _read_marker(lane_dir: Path) -> dict:
@@ -377,11 +466,15 @@ def run_review_lane(
     install_source = "flag" if install is not None else None
     package_source = "flag" if package is not None else None
     hint = read_install_hint(repo_dir)
-    if install is None and hint and hint.get("install"):
-        install = [
-            tok.replace("{venv}", str(venv_python)).replace("{lane}", str(repo_dir))
-            for tok in shlex.split(hint["install"])
-        ]
+    if install is not None:
+        # The --install FLAG supports the SAME {venv}/{lane} placeholders as the hint,
+        # so the documented template works identically whether typed on the CLI or
+        # declared in .review-install. review-run door 2: only the hint substituted, so
+        # a reviewer who passed the documented `{venv} -m pip install -e {lane}` on the
+        # flag got literal braces and a failed install.
+        install = _apply_install_placeholders(install, venv_python, repo_dir)
+    elif hint and hint.get("install"):
+        install = _apply_install_placeholders(shlex.split(hint["install"]), venv_python, repo_dir)
         install_source = "hint"
     if package is None and hint and hint.get("package"):
         package = hint["package"]
@@ -452,12 +545,23 @@ def run_review_lane(
             f"(it is a test-time dependency). stderr: {proc.stderr.strip()[-300:]}",
         )
 
-    # (7) run pytest; counts from the summary line, never the exit code.
-    test_cmd = [str(venv_python), "-m", "pytest", *pytest_args]
+    # (7) run pytest; counts from the summary line, never the exit code. The full
+    #     output is persisted to a log in the lane and the failed node ids are parsed
+    #     from it, so a red receipt says WHICH tests failed and the raw text survives
+    #     for close-gr to carry out (review-run door 1).
+    # Guarantee the short test summary lists every FAILED/ERROR node id for
+    # parse_failed_ids. pytest emits those summary lines only under `-r`, and `-r` is
+    # LAST-WINS: a prepended `-rfE` would be silently overridden by a caller `-rN`/`-rs`,
+    # leaving failed_ids empty on a real red run. merge_report_flags folds f/E INTO the
+    # caller's own -r chars, so f and E survive whatever the caller passed.
+    test_cmd = [str(venv_python), "-m", "pytest", *merge_report_flags(pytest_args)]
     proc = subprocess.run(
         test_cmd, text=True, capture_output=True, cwd=str(repo_dir), env=run_env
     )
-    summary = parse_pytest_summary(proc.stdout + "\n" + proc.stderr)
+    pytest_output = proc.stdout + "\n" + proc.stderr
+    (lane_dir / _OUTPUT_LOG_NAME).write_text(pytest_output)
+    failed_ids = parse_failed_ids(pytest_output)
+    summary = parse_pytest_summary(pytest_output)
     if summary is None:
         raise ReviewRunRefused(
             "unparseable_summary",
@@ -486,6 +590,10 @@ def run_review_lane(
     )
     receipt = {
         "kind": "review-run",
+        # When this run happened, so close-gr can key the preserved evidence by
+        # (gr commit, run time) and two closes of the same lane name do not overwrite
+        # each other's receipt/log.
+        "created": datetime.now(timezone.utc).isoformat(),
         "gr_commit": marker.get("gr_commit", ""),
         "bound_head": repo.get("bound_head", ""),
         "bound_head_tree": bound_tree,
@@ -503,6 +611,10 @@ def run_review_lane(
         "skipped": summary["skipped"],
         "xfailed": summary["xfailed"],
         "errors": summary["errors"],
+        # WHICH tests failed (node ids parsed from the summary), so a red receipt is
+        # actionable and not just a count, and the raw output log this run wrote.
+        "failed_ids": failed_ids,
+        "output_log": _OUTPUT_LOG_NAME,
         "result": result,
     }
     (lane_dir / _RECEIPT_NAME).write_text(json.dumps(receipt, indent=2) + "\n")

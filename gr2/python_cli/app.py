@@ -2196,21 +2196,30 @@ def review_open_gr(
         if not keys:
             typer.echo("refused: no_rows: the gr commit binds no repository rows", err=True)
             raise typer.Exit(code=2)
-        results = {
-            row_key: _review_call(
-                grip.reconstruct_review_lane, workspace_root.resolve(), sha, row_key, root / row_key
-            )
-            for row_key in keys
-        }
-        from . import open_gr_review
-        open_gr_review.write_open_gr_marker(root, sha, results)
-        if json_output:
-            typer.echo(json.dumps(results, indent=2))
+        if len(keys) == 1:
+            # review-run door 3: a SINGLE bound row with no --repo materializes into
+            # --lane-dir ITSELF (the lane IS the clone), exactly as `--repo <key>` would,
+            # so the marker sits AT the tree root and `review run <lane-dir>` works.
+            # Laying the one row out under <lane-dir>/<key> put the marker one level
+            # ABOVE the only tree, after which neither `review run <lane-dir>` (no git
+            # repo there) nor `review run <lane-dir>/<key>` (no marker there) could run.
+            key = keys[0]
         else:
-            for row_key, res in results.items():
-                match = res["bound_head_tree"] == res["reconstructed_tree"]
-                typer.echo(f"{row_key}: lane={res['lane']} tree_match={match}")
-        return
+            results = {
+                row_key: _review_call(
+                    grip.reconstruct_review_lane, workspace_root.resolve(), sha, row_key, root / row_key
+                )
+                for row_key in keys
+            }
+            from . import open_gr_review
+            open_gr_review.write_open_gr_marker(root, sha, results)
+            if json_output:
+                typer.echo(json.dumps(results, indent=2))
+            else:
+                for row_key, res in results.items():
+                    match = res["bound_head_tree"] == res["reconstructed_tree"]
+                    typer.echo(f"{row_key}: lane={res['lane']} tree_match={match}")
+            return
     result = _review_call(
         grip.reconstruct_review_lane, workspace_root.resolve(), sha, key, root
     )
@@ -2245,6 +2254,11 @@ def review_close_gr(
         typer.echo(json.dumps(result, indent=2))
     else:
         typer.echo(f"reclaimed {result['reclaimed']} (gr:{result['gr_commit']})")
+        preserved = result.get("preserved_run")
+        if preserved:
+            typer.echo(f"review-run receipt kept at {preserved['receipt']}")
+            if preserved.get("log"):
+                typer.echo(f"review-run output log kept at {preserved['log']}")
 
 
 @review_app.command("run")
@@ -2253,7 +2267,7 @@ def review_run(
     package: Optional[str] = typer.Option(None, "--package", help="Importable package name to bind the install to the lane (its __file__ must resolve under the lane). Optional if the lane's .review-install declares `package`."),
     python: Optional[str] = typer.Option(None, "--python", help="Interpreter to build the lane venv from; defaults to the running interpreter. Recorded in the receipt."),
     system_site_packages: bool = typer.Option(False, "--system-site-packages", help="Create the lane venv with --system-site-packages (host tools visible)"),
-    install: Optional[str] = typer.Option(None, "--install", help="Install command (shell-split); defaults to the lane's .review-install hint, else `<venv python> -m pip install -e <lane>`"),
+    install: Optional[str] = typer.Option(None, "--install", help="Install command (shell-split); `{venv}` and `{lane}` are substituted per token, same as the .review-install hint. Defaults to the lane's .review-install hint, else `<venv python> -m pip install -e <lane>`"),
     json_output: bool = typer.Option(False, "--json", help="Emit the receipt as JSON"),
     pytest_args: Optional[List[str]] = typer.Argument(None, help="Args passed to pytest after `--` (every -k/-p/path filter is recorded)"),
 ) -> None:

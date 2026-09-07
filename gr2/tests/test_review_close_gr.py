@@ -93,6 +93,157 @@ def test_close_gr_reclaims_the_lane(tmp_path: Path) -> None:
     assert gr_sha[:12] in res.output, res.output  # names the commit it reclaimed
 
 
+def test_open_gr_no_repo_single_row_puts_the_marker_at_the_tree(tmp_path: Path) -> None:
+    # review-run door 3: with a SINGLE bound row and no --repo, open-gr used to lay the
+    # clone under <lane-dir>/<key> while writing the marker at <lane-dir> -- one level
+    # ABOVE the only tree -- so `review run <lane-dir>` found the marker but no git repo
+    # and `review run <lane-dir>/<key>` found the repo but no marker. The single row with
+    # no --repo must collapse to the --repo layout: clone AND marker at <lane-dir>.
+    runner = CliRunner()
+    ws = tmp_path / "ws"
+    (ws / ".grip").mkdir(parents=True)
+    from gr2.python_cli import grip
+    grip.grip_init(ws)
+    remote, base, head, range_patch = _base_remote_and_range(tmp_path)
+    range_file = tmp_path / "range.patch"
+    range_file.write_text(range_patch)
+    res = runner.invoke(gr2_app.app, [
+        "review", "bind", str(ws), "--repo", "alpha", "--remote", remote,
+        "--base", base, "--head", head, "--ref", "refs/heads/main",
+        "--from-range", str(range_file),
+    ])
+    assert res.exit_code == 0, res.output
+    gr_sha = res.output.strip()[len("gr:"):]
+
+    lane_dir = tmp_path / "lane"
+    # NO --repo
+    res2 = runner.invoke(gr2_app.app, [
+        "review", "open-gr", str(ws), gr_sha, "--lane-dir", str(lane_dir), "--enter",
+    ])
+    assert res2.exit_code == 0, res2.output
+    # the marker and the reconstructed clone are BOTH at the lane root -- not nested
+    assert (lane_dir / open_gr_review._OPEN_GR_MARKER).is_file(), "marker must be at the tree root"
+    assert (lane_dir / ".git").exists(), "the reconstructed clone must be AT lane-dir, not a subdir"
+    assert not (lane_dir / "alpha").exists(), "the single row must not be nested under <key>"
+    # and the marker/clone alignment is exactly what `review run` and `close-gr` consume:
+    marker = json.loads((lane_dir / open_gr_review._OPEN_GR_MARKER).read_text())
+    assert marker["kind"] == "open-gr-reconstruct"
+    res3 = runner.invoke(gr2_app.app, ["review", "close-gr", str(lane_dir)])
+    assert res3.exit_code == 0, res3.output
+    assert not lane_dir.exists()
+
+
+def test_close_gr_keeps_the_review_run_receipt_and_log(tmp_path: Path) -> None:
+    # review-run door 1 (close half): `review run` writes its receipt and pytest-output
+    # log INSIDE the lane, so close-gr's rmtree would destroy the only record of a red
+    # run (35 env failures, in the real review). close-gr must carry them OUT first, to
+    # a path it names, that survives the rmtree — asserted to exist AFTER close.
+    from gr2.python_cli import review_run as rr
+
+    runner = CliRunner()
+    lane_dir, gr_sha = _open_gr_lane(tmp_path, runner)
+    # a red run's artifacts, as review_run would write them into the lane
+    (lane_dir / rr._OUTPUT_LOG_NAME).write_text(
+        "=== short test summary info ===\nFAILED tests/t.py::test_bad - boom\n"
+    )
+    (lane_dir / rr._RECEIPT_NAME).write_text(json.dumps({
+        "kind": "review-run", "created": "2026-09-07T09:00:00+00:00",
+        "gr_commit": gr_sha, "result": "red", "failed": 1,
+        "failed_ids": ["tests/t.py::test_bad"],
+        "output_log": rr._OUTPUT_LOG_NAME,
+    }, indent=2) + "\n")
+
+    res = runner.invoke(gr2_app.app, ["review", "close-gr", str(lane_dir), "--json"])
+    assert res.exit_code == 0, res.output
+    assert not lane_dir.exists(), "close-gr still reclaims the lane"
+
+    result = json.loads(res.output)
+    preserved = result["preserved_run"]
+    receipt_path = Path(preserved["receipt"])
+    log_path = Path(preserved["log"])
+    # the evidence exists AFTER the rmtree, outside the (now gone) lane
+    assert receipt_path.is_file(), "the run receipt must survive close-gr"
+    assert log_path.is_file(), "the run output log must survive close-gr"
+    assert lane_dir not in receipt_path.parents and lane_dir not in log_path.parents
+    # the surviving receipt names its surviving log (the lane-relative name is dead)
+    kept = json.loads(receipt_path.read_text())
+    assert kept["failed_ids"] == ["tests/t.py::test_bad"]
+    assert Path(kept["output_log"]) == log_path and Path(kept["output_log"]).is_file()
+    assert "FAILED tests/t.py::test_bad" in log_path.read_text()
+
+
+def test_close_gr_with_no_review_run_has_nothing_to_keep(tmp_path: Path) -> None:
+    # A lane that was opened but never `review run` has no receipt: close-gr reclaims it
+    # exactly as before and preserves nothing (no empty sibling dir, no crash).
+    runner = CliRunner()
+    lane_dir, gr_sha = _open_gr_lane(tmp_path, runner)
+    res = runner.invoke(gr2_app.app, ["review", "close-gr", str(lane_dir), "--json"])
+    assert res.exit_code == 0, res.output
+    assert not lane_dir.exists()
+    assert "preserved_run" not in json.loads(res.output)
+    assert not (lane_dir.parent / f"{lane_dir.name}.review-run").exists()
+
+
+def test_close_gr_twice_same_lane_keeps_both_runs(tmp_path: Path) -> None:
+    # review-run door 1, R2 v2 probe: closing the SAME lane name twice must preserve
+    # BOTH runs' receipt+log. v1 keyed the preserved dir by lane name alone
+    # (<lane>.review-run, mkdir exist_ok + copy2), so the second close overwrote the
+    # first's evidence in place -- door 1's promise held for one close per lane name.
+    # v2 keys by (gr short sha, run timestamp) from the receipt, so a reopen+rerun of
+    # the same lane lands beside the first rather than on top of it.
+    from gr2.python_cli import review_run as rr
+    from gr2.python_cli import grip
+
+    runner = CliRunner()
+    ws = tmp_path / "ws"
+    (ws / ".grip").mkdir(parents=True)
+    grip.grip_init(ws)
+    remote, base, head, range_patch = _base_remote_and_range(tmp_path)
+    range_file = tmp_path / "range.patch"
+    range_file.write_text(range_patch)
+    res = runner.invoke(gr2_app.app, [
+        "review", "bind", str(ws), "--repo", "alpha", "--remote", remote,
+        "--base", base, "--head", head, "--ref", "refs/heads/main",
+        "--from-range", str(range_file),
+    ])
+    assert res.exit_code == 0, res.output
+    gr_sha = res.output.strip()[len("gr:"):]
+    lane_dir = tmp_path / "lane"
+
+    def open_run_close(created: str, tag: str) -> dict:
+        ro = runner.invoke(gr2_app.app, [
+            "review", "open-gr", str(ws), gr_sha, "--repo", "alpha",
+            "--lane-dir", str(lane_dir), "--enter",
+        ])
+        assert ro.exit_code == 0, ro.output
+        (lane_dir / rr._OUTPUT_LOG_NAME).write_text(f"FAILED tests/t.py::{tag} - boom\n")
+        (lane_dir / rr._RECEIPT_NAME).write_text(json.dumps({
+            "kind": "review-run", "created": created, "gr_commit": gr_sha,
+            "result": "red", "failed": 1, "failed_ids": [f"tests/t.py::{tag}"],
+            "output_log": rr._OUTPUT_LOG_NAME,
+        }, indent=2) + "\n")
+        rc = runner.invoke(gr2_app.app, ["review", "close-gr", str(lane_dir), "--json"])
+        assert rc.exit_code == 0, rc.output
+        assert not lane_dir.exists()
+        return json.loads(rc.output)["preserved_run"]
+
+    p1 = open_run_close("2026-09-07T10:00:00+00:00", "test_first")
+    p2 = open_run_close("2026-09-07T11:30:00+00:00", "test_second")
+
+    # the two closes preserved to DISTINCT paths -- the second did not overwrite the first
+    assert p1["receipt"] != p2["receipt"], (p1, p2)
+    r1 = json.loads(Path(p1["receipt"]).read_text())
+    r2 = json.loads(Path(p2["receipt"]).read_text())
+    assert r1["failed_ids"] == ["tests/t.py::test_first"], r1
+    assert r2["failed_ids"] == ["tests/t.py::test_second"], r2
+    assert r1["created"] != r2["created"]
+    # both logs survive, each with its own run's failures
+    assert "test_first" in Path(p1["log"]).read_text()
+    assert "test_second" in Path(p2["log"]).read_text()
+    # and reading the FIRST receipt back still shows the first run (not clobbered)
+    assert json.loads(Path(p1["receipt"]).read_text())["failed_ids"] == ["tests/t.py::test_first"]
+
+
 def test_open_gr_enter_refuses_a_nonempty_lane_dir(tmp_path: Path) -> None:
     # Probe C (Stromus R2 v1, RAN): open-gr --enter into a PRE-EXISTING dir that holds
     # a foreign file must REFUSE, because close-gr reclaims the WHOLE --lane-dir. The
