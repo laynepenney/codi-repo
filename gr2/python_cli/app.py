@@ -7,7 +7,7 @@ import os
 import tomllib
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Optional
+from typing import List, Optional
 
 import typer
 from gr2.prototypes import lane_workspace_prototype as lane_proto
@@ -2245,6 +2245,53 @@ def review_close_gr(
         typer.echo(json.dumps(result, indent=2))
     else:
         typer.echo(f"reclaimed {result['reclaimed']} (gr:{result['gr_commit']})")
+
+
+@review_app.command("run")
+def review_run(
+    lane_dir: Path = typer.Argument(..., help="The open-gr reconstruction lane (the --lane-dir from `review open-gr --enter`)"),
+    package: str = typer.Option(..., "--package", help="Importable package name to bind the install to the lane (its __file__ must resolve under the lane)"),
+    python: Optional[str] = typer.Option(None, "--python", help="Interpreter to build the lane venv from; defaults to the running interpreter. Recorded in the receipt."),
+    system_site_packages: bool = typer.Option(False, "--system-site-packages", help="Create the lane venv with --system-site-packages (host tools visible)"),
+    install: Optional[str] = typer.Option(None, "--install", help="Install command (shell-split); defaults to `<venv python> -m pip install -e <lane>`"),
+    json_output: bool = typer.Option(False, "--json", help="Emit the receipt as JSON"),
+    pytest_args: Optional[List[str]] = typer.Argument(None, help="Args passed to pytest after `--` (every -k/-p/path filter is recorded)"),
+) -> None:
+    """The review-owned in-lane test run: create `<lane>/.venv`, install the
+    reconstructed tree, and run pytest — but only after the lane's tree is proven to
+    equal the bound head-tree and the import resolves under the lane. Counts come
+    from pytest's summary line, never the exit code; a zero-test or unparseable run
+    is a refusal, not a green."""
+    import shlex
+
+    from . import review_run as rr
+
+    install_cmd = shlex.split(install) if install else None
+    try:
+        receipt = rr.run_review_lane(
+            lane_dir.resolve(),
+            package=package,
+            pytest_args=list(pytest_args or []),
+            python=python,
+            install=install_cmd,
+            system_site_packages=system_site_packages,
+        )
+    except rr.ReviewRunRefused as exc:
+        typer.echo(f"refused: {exc}", err=True)
+        raise typer.Exit(code=2)
+    if json_output:
+        typer.echo(json.dumps(receipt, indent=2))
+    else:
+        typer.echo(
+            f"{receipt['result']}: selected={receipt['selected']} "
+            f"passed={receipt['passed']} failed={receipt['failed']} "
+            f"skipped={receipt['skipped']} xfailed={receipt['xfailed']} "
+            f"errors={receipt['errors']}"
+        )
+        typer.echo(f"bound_head_tree: {receipt['bound_head_tree']}")
+        typer.echo(f"install resolved: {receipt['resolved_install_path']}")
+    if receipt["result"] != "green":
+        raise typer.Exit(code=1)
 
 
 @review_app.command("verify")

@@ -46,6 +46,9 @@ def write_open_gr_marker(lane_dir: Path, gr_commit: str, results: dict) -> None:
             {
                 "key": key,
                 "reconstructed_head": res.get("reconstructed_head", ""),
+                "bound_head": res.get("bound_head", ""),
+                "bound_head_tree": res.get("bound_head_tree", ""),
+                "reconstructed_tree": res.get("reconstructed_tree", ""),
                 "tree_match": res.get("bound_head_tree") == res.get("reconstructed_tree"),
             }
             for key, res in results.items()
