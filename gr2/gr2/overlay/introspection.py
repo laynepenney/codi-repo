@@ -7,7 +7,7 @@ import tomllib
 from pathlib import Path
 from typing import Any
 
-from gr2_overlay.types import OverlayRef
+from gr2.overlay.types import OverlayRef
 
 GRIP_DIR = ".grip"
 

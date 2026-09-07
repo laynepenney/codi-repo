@@ -5,14 +5,14 @@ from pathlib import Path
 
 import pytest
 
-from gr2_overlay.activate import read_active_overlay_stack
-from gr2_overlay.objects import capture_overlay_object
-from gr2_overlay.trust import write_workspace_allowlist
-from gr2_overlay.types import OverlayMeta, OverlayRef, OverlayTier, TrustLevel
+from gr2.overlay.activate import read_active_overlay_stack
+from gr2.overlay.objects import capture_overlay_object
+from gr2.overlay.trust import write_workspace_allowlist
+from gr2.overlay.types import OverlayMeta, OverlayRef, OverlayTier, TrustLevel
 
 
 def test_activate_overlays_atomically_applies_to_both_repos_or_none(tmp_path: Path) -> None:
-    from gr2_overlay.cross_repo import RepoOverlayTarget, activate_overlays_atomically
+    from gr2.overlay.cross_repo import RepoOverlayTarget, activate_overlays_atomically
 
     overlay_ref = OverlayRef(author="atlas", name="workspace-bundle")
     app_store, app_workspace, app_source = _triplet(tmp_path, "app")
@@ -65,7 +65,7 @@ def test_activate_overlays_atomically_applies_to_both_repos_or_none(tmp_path: Pa
 
 
 def test_atomic_apply_rolls_back_first_repo_when_second_repo_blocks(tmp_path: Path) -> None:
-    from gr2_overlay.cross_repo import (
+    from gr2.overlay.cross_repo import (
         CrossRepoActivationError,
         RepoOverlayTarget,
         activate_overlays_atomically,

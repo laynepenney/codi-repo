@@ -5,7 +5,7 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
-from gr2_overlay.types import OverlayMeta, OverlayRef, OverlayTier
+from gr2.overlay.types import OverlayMeta, OverlayRef, OverlayTier
 
 TIER_A_EXTENSIONS = frozenset({".toml", ".yml", ".json"})
 TIER_A_FILENAMES = frozenset({"COMPOSE.md"})

@@ -6,12 +6,12 @@ import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from gr2_overlay.activate import (
+from gr2.overlay.activate import (
     OverlayActivationError,
     activate_overlay,
     deactivate_overlay,
 )
-from gr2_overlay.types import OverlayRef
+from gr2.overlay.types import OverlayRef
 
 
 @dataclass(frozen=True)

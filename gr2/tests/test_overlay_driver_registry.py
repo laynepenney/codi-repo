@@ -4,8 +4,8 @@ from pathlib import Path
 
 import pytest
 
-from gr2_overlay.drivers import CURATED_DRIVERS, install_driver_registry, invoke_driver
-from gr2_overlay.types import OverlayRef
+from gr2.overlay.drivers import CURATED_DRIVERS, install_driver_registry, invoke_driver
+from gr2.overlay.types import OverlayRef
 
 
 def test_curated_driver_registry_is_exact_and_closed() -> None:

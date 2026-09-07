@@ -1,10 +1,19 @@
 [build-system]
 requires = ["setuptools>=68.0"]
-build-backend = "setuptools.build_meta"
+# In-tree backend (gr2/_build/backend.py): single-sources the version from the
+# repo-root Cargo.toml at build time so a published wheel says which grip it
+# belongs to, instead of a hand-maintained number drifting from the Rust crate.
+build-backend = "backend"
+backend-path = ["_build"]
 
 [project]
-name = "gr2-overlay"
-version = "0.1.0"
+# One product name across both indexes: `cargo install gitgrip` gives `gr`,
+# `pip install gitgrip` gives `gr2` (the console script below). The import
+# package is `gr2`; `gr2_overlay` survives only as a deprecated compat shim.
+name = "gitgrip"
+# Single-sourced from Cargo.toml at build time (see [build-system] backend and
+# [tool.setuptools.dynamic] below); never hand-edited here.
+dynamic = ["version"]
 description = "gr2 overlay substrate: config-overlay capture, composition, and materialization"
 requires-python = ">=3.11"
 dependencies = [
@@ -27,18 +36,24 @@ dev = [
     "ruff>=0.4",
 ]
 
+[tool.setuptools.dynamic]
+# VERSION is generated at build time by _build/backend.py from ../Cargo.toml; it
+# is gitignored and travels inside the sdist (MANIFEST.in) for wheel-from-sdist.
+version = { file = "VERSION" }
+
 [tool.setuptools]
-# gr2_overlay is a time-bounded compatibility alias for gr2.overlay:
-# same physical directory, two import names. New code imports
-# gr2.overlay; gr2_overlay stays for existing consumers until they are
-# migrated separately.
-packages = ["gr2_overlay", "gr2", "gr2.python_cli", "gr2.prototypes", "gr2.overlay"]
+# The overlay subsystem is `gr2.overlay` (physically gr2/overlay). `gr2_overlay`
+# is a deprecated top-level compat shim that aliases every submodule through
+# sys.modules to the real gr2.overlay object; it is removed in the release after
+# 1.5.0 once a downstream consumer migrates off the old import.
+packages = ["gr2", "gr2.python_cli", "gr2.prototypes", "gr2.overlay", "gr2_overlay"]
 
 [tool.setuptools.package-dir]
+# gr2.overlay resolves under the gr2 package dir (gr2/overlay) with no explicit
+# mapping; the gr2_overlay shim maps to its own top-level dir by default.
 gr2 = "gr2"
 "gr2.python_cli" = "python_cli"
 "gr2.prototypes" = "prototypes"
-"gr2.overlay" = "gr2_overlay"
 
 [tool.setuptools.package-data]
 # The pinned MaterializationPlan v1 schema ships inside the
@@ -47,7 +62,7 @@ gr2 = "gr2"
 gr2 = ["schemas/*.json"]
 
 [tool.pytest.ini_options]
-testpaths = ["tests", "gr2_overlay/tests"]
+testpaths = ["tests", "gr2/overlay/tests"]
 
 [tool.ruff]
 target-version = "py311"

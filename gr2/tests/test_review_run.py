@@ -10,6 +10,7 @@ seeds a `.pth`, and the current sys.path is added so host pytest is importable).
 from __future__ import annotations
 
 import json
+import shlex
 import site
 import subprocess
 import sys
@@ -110,6 +111,74 @@ def test_parse_summary_records_the_selection_visibly():
 
 def test_parse_summary_unparseable_is_none():
     assert rr.parse_pytest_summary("Traceback...\nImportError: boom\n") is None
+
+
+def test_parse_failed_ids_from_real_pytest_summary():
+    # review-run door 1: the node ids come from pytest's `-rfE` short test summary.
+    # The fixture is real pytest output shape and includes the two ids a naive parser
+    # gets wrong: an ERROR-at-setup node (status word ERROR, not FAILED) and a
+    # PARAMETRIZED id whose brackets must be kept intact so the reviewer can re-run
+    # exactly that case.
+    out = (
+        "collected 4 items\n\n"
+        "tests/test_math.py .FF                                              [ 75%]\n"
+        "tests/test_db.py E                                                  [100%]\n\n"
+        "==================================== ERRORS ====================================\n"
+        "____________________ ERROR at setup of test_query ____________________\n"
+        "...fixture 'conn' not found...\n"
+        "=========================== short test summary info ============================\n"
+        "FAILED tests/test_math.py::test_add - assert 1 == 2\n"
+        "FAILED tests/test_math.py::test_param[case-2 with spaces] - AssertionError\n"
+        "ERROR tests/test_db.py::test_query - fixture 'conn' not found\n"
+        "======================= 2 failed, 1 error in 0.12s ========================\n"
+    )
+    ids = rr.parse_failed_ids(out)
+    assert ids == [
+        "tests/test_db.py::test_query",
+        "tests/test_math.py::test_add",
+        "tests/test_math.py::test_param[case-2 with spaces]",
+    ], ids
+
+
+def test_parse_failed_ids_keeps_a_parametrized_id_with_spaces_whole():
+    # A parametrized id can contain spaces inside its brackets; `\\S+` would truncate
+    # at the first space. Pin the whole id so the reviewer can re-run exactly it.
+    out = (
+        "=========================== short test summary info ============================\n"
+        "FAILED tests/t.py::test_param[case 2 with spaces] - AssertionError\n"
+    )
+    assert rr.parse_failed_ids(out) == ["tests/t.py::test_param[case 2 with spaces]"]
+
+
+def test_parse_failed_ids_empty_when_all_pass():
+    out = "collected 3 items\n\n===== 3 passed in 0.01s =====\n"
+    assert rr.parse_failed_ids(out) == []
+
+
+def test_merge_report_flags_puts_fE_last_and_drops_N():
+    # Sentinel R1 (v3, measured): pytest's -r is LAST-WINS across tokens AND its chars
+    # are processed IN ORDER, with N (none) CLEARING everything before it. So f/E must
+    # (a) win over any later caller -r and (b) come AFTER any N, or a sorted union like
+    # -rENf drops ERROR (E added, N clears, f added). Fix: drop N (the run requires
+    # output), keep caller chars in order, append f/E LAST.
+    def r(args):
+        out = rr.merge_report_flags(args)
+        assert out[0].startswith("-r"), out
+        assert sum(1 for a in out if a == "-r" or (a.startswith("-r") and len(a) > 2)) == 1, out
+        return out[0][2:], out[1:]
+
+    chars, rest = r(["-q"]); assert chars == "fE" and rest == ["-q"]
+    chars, rest = r(["-rN", "-q"]); assert chars == "fE" and rest == ["-q"]   # N dropped
+    chars, _ = r(["-rs"]); assert chars == "sfE"                              # caller kept, fE last
+    chars, rest = r(["-r", "sx", "-q"]); assert chars == "sxfE" and rest == ["-q"]
+    chars, _ = r(["-rNEf"]); assert chars == "fE"                             # N gone, E/f re-appended last
+    chars, _ = r(["-rA"]); assert chars == "AfE"                             # A (all) stays ahead of f/E
+    chars, _ = r([]); assert chars == "fE"
+    chars, _ = r(["-rN", "-q", "-rsx"]); assert chars == "sxfE"              # collapse, N gone, fE last
+    # invariant across shapes: no N survives, and the spec ENDS with f then E
+    for a in (["-rN"], ["-rxN"], ["-rA"], ["-q"], ["-r", "Ns"]):
+        c = rr.merge_report_flags(a)[0][2:]
+        assert "N" not in c and c.endswith("fE"), (a, c)
 
 
 # ---------------------------------------------------- THE tree comparison + drift
@@ -223,6 +292,66 @@ def test_run_green_records_a_bound_receipt(tmp_path: Path):
     assert (repo / rr._RECEIPT_NAME).exists()
 
 
+def test_run_red_receipt_names_the_failed_ids_and_keeps_the_output(tmp_path: Path):
+    # review-run door 1: a red run's receipt records only COUNTS (`failed: 35`) with
+    # no way back to WHICH tests failed, and the raw pytest output is never persisted
+    # at all -- so a reviewer reading the receipt (or the coordinator reading a pasted
+    # one) cannot see the failures. Real fixture: my own real review, 35 env failures
+    # with no ids. The receipt must carry the failed node ids AND the run must write
+    # the full pytest output to a log file in the lane.
+    body = (
+        "from demo_pkg import VALUE\n\n"
+        "def test_ok():\n    assert VALUE == 1\n\n"
+        "def test_bad():\n    assert VALUE == 2\n\n"
+        "def test_also_bad():\n    raise RuntimeError('boom')\n"
+    )
+    repo, head_tree = _pkg_repo(tmp_path, test_body=body)
+    _write_marker(repo, _git(repo, "rev-parse", "HEAD"), head_tree)
+    receipt = rr.run_review_lane(
+        repo, package="demo_pkg", pytest_args=["-q"], install=_offline_install(repo),
+    )
+    assert receipt["result"] == "red"
+    assert receipt["failed"] >= 1
+    # the node ids of the failures are recoverable from the receipt, not just a count.
+    ids = receipt["failed_ids"]
+    assert any(nid.endswith("::test_bad") for nid in ids), ids
+    assert any(nid.endswith("::test_also_bad") for nid in ids), ids
+    assert not any(nid.endswith("::test_ok") for nid in ids), ids
+    # every id names a real node (path::test), so a reader can re-run exactly it.
+    assert all("::" in nid for nid in ids), ids
+    # and the full pytest output is persisted in the lane (survives to close, below).
+    log = repo / rr._OUTPUT_LOG_NAME
+    assert log.is_file(), "review run must write the pytest output to a log file"
+    assert "test_bad" in log.read_text()
+    assert receipt["output_log"] == rr._OUTPUT_LOG_NAME
+
+
+def test_run_red_ids_survive_a_caller_rN_with_a_setup_error(tmp_path: Path):
+    # Sentinel R1 (v3, measured): a caller -rN must not suppress EITHER FAILED or ERROR
+    # ids. The v2 witness had only a plain failure, so a sorted union `-rENf` (where N
+    # clears the E that precedes it) still PASSED it while silently dropping ERROR ids.
+    # This fixture has BOTH a plain assertion failure AND an ERROR-at-setup (a fixture
+    # that raises), so the ERROR path is exercised: both ids must come back.
+    body = (
+        "import pytest\n"
+        "from demo_pkg import VALUE\n\n"
+        "@pytest.fixture\n"
+        "def boom():\n    raise RuntimeError('setup fail')\n\n"
+        "def test_ok():\n    assert VALUE == 1\n\n"
+        "def test_bad():\n    assert VALUE == 2\n\n"
+        "def test_errored(boom):\n    assert True\n"
+    )
+    repo, head_tree = _pkg_repo(tmp_path, test_body=body)
+    _write_marker(repo, _git(repo, "rev-parse", "HEAD"), head_tree)
+    receipt = rr.run_review_lane(
+        repo, package="demo_pkg", pytest_args=["-q", "-rN"], install=_offline_install(repo),
+    )
+    assert receipt["result"] == "red"
+    ids = receipt["failed_ids"]
+    assert any(nid.endswith("::test_bad") for nid in ids), ids       # FAILED survives
+    assert any(nid.endswith("::test_errored") for nid in ids), ids   # ERROR survives (the v2 gap)
+
+
 def test_run_refuses_when_a_k_filter_selects_zero_tests(tmp_path: Path):
     # Stromus addition 2: zero selected is a refusal, not a green — from the summary
     # line, not the exit code (pytest exits 0 having run nothing).
@@ -294,3 +423,224 @@ def test_run_refuses_when_the_import_escapes_the_lane(tmp_path: Path):
             os.environ.pop("PYTHONPATH", None)
         else:
             os.environ["PYTHONPATH"] = old
+
+
+# ------------------------------------------ install hint + pytest-absent cause
+
+_SEED_SCRIPT = (
+    "import site,sys,pathlib;"
+    "sp=pathlib.Path(site.getsitepackages()[0]);"
+    "sp.mkdir(parents=True,exist_ok=True);"
+    "(sp/'zz_lane.pth').write_text('\\n'.join(sys.argv[1:])+'\\n')"
+)
+
+
+def _offline_install_no_pytest(lane: Path) -> list[str]:
+    """Seed a .pth with ONLY the package's src — NOT host sys.path — so demo_pkg
+    imports but pytest is absent from the lane venv."""
+    vpy = lane / rr._VENV_DIRNAME / "bin" / "python"
+    return [str(vpy), "-c", _SEED_SCRIPT, str(lane / "src")]
+
+
+def _hint_install_string() -> str:
+    """The offline install as a .review-install `install =` value, with {venv}/{lane}
+    placeholders review run substitutes; includes host sys.path so pytest resolves."""
+    paths = ["{lane}/src", *[p for p in sys.path if p]]
+    return shlex.join(["{venv}", "-c", _SEED_SCRIPT, *paths])
+
+
+def test_run_install_flag_substitutes_venv_and_lane(tmp_path: Path):
+    # review-run door 2: the --install FLAG must substitute {venv}/{lane} exactly as
+    # the .review-install hint does. Before the fix only the hint substituted, so a
+    # reviewer who passed the documented `{venv} ... {lane}` template on the flag got
+    # LITERAL braces -> the install binary "{venv}" does not exist -> install_failed.
+    repo, head_tree = _pkg_repo(tmp_path, test_body=PASS_TEST)
+    _write_marker(repo, _git(repo, "rev-parse", "HEAD"), head_tree)
+    # the flag carries the SAME placeholder template the hint accepts
+    install = shlex.split(_hint_install_string())
+    assert "{venv}" in install and any("{lane}" in t for t in install), install
+    receipt = rr.run_review_lane(
+        repo, package="demo_pkg", pytest_args=["-q"], install=install,
+    )
+    assert receipt["result"] == "green", receipt
+    # no literal placeholder survives, and {venv} resolved to the lane venv python
+    assert not any("{venv}" in t or "{lane}" in t for t in receipt["install_command"]), receipt["install_command"]
+    assert receipt["install_command"][0] == receipt["interpreter"]["path"]
+    # {lane} resolved to the lane path
+    assert str(repo.resolve() / "src") in receipt["install_command"], receipt["install_command"]
+    assert receipt["install_source"] == "flag"
+
+
+def test_run_refuses_pytest_absent_with_the_named_cause(tmp_path: Path):
+    # half 1: an install that brings the package but NOT pytest must
+    # refuse `pytest_not_installed`, NOT `unparseable_summary` (the wrong cause the
+    # dogfood hit). Keep it a refusal either way.
+    repo, head_tree = _pkg_repo(tmp_path, test_body=PASS_TEST)
+    _write_marker(repo, _git(repo, "rev-parse", "HEAD"), head_tree)
+    with pytest.raises(rr.ReviewRunRefused) as exc:
+        rr.run_review_lane(
+            repo, package="demo_pkg", pytest_args=["-q"],
+            install=_offline_install_no_pytest(repo),
+        )
+    assert exc.value.code == "pytest_not_installed", exc.value.code
+
+
+def test_review_install_hint_supplies_install_and_package(tmp_path: Path):
+    # half 2: a repo that declares .review-install (tracked, so it is part
+    # of the bound tree) runs green with NO --install and NO --package.
+    repo, _ = _pkg_repo(tmp_path, test_body=PASS_TEST)
+    (repo / ".review-install").write_text(
+        f"# hint\ninstall = {_hint_install_string()}\npackage = demo_pkg\n"
+    )
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-q", "-m", "hint")
+    head = _git(repo, "rev-parse", "HEAD")
+    head_tree = _git(repo, "rev-parse", "HEAD^{tree}")
+    _write_marker(repo, head, head_tree)
+    receipt = rr.run_review_lane(repo, pytest_args=["-q"])  # no install, no package
+    assert receipt["result"] == "green", receipt
+    assert receipt["passed"] >= 1
+
+
+def test_no_review_install_hint_still_needs_the_flags(tmp_path: Path):
+    # Control: a repo WITHOUT the hint does not auto-resolve — read returns None and a
+    # run with neither flag refuses `no_package`, so the hint is what removes the flag.
+    repo, head_tree = _pkg_repo(tmp_path, test_body=PASS_TEST)
+    _write_marker(repo, _git(repo, "rev-parse", "HEAD"), head_tree)
+    assert rr.read_install_hint(repo) is None
+    with pytest.raises(rr.ReviewRunRefused) as exc:
+        rr.run_review_lane(repo, pytest_args=["-q"])  # no hint, no --package
+    assert exc.value.code == "no_package", exc.value.code
+
+
+# ---------------------------------------------------- v3: R2 REQUEST-CHANGES items
+
+def test_hint_bad_binary_refuses_install_failed(tmp_path: Path):
+    # P3 (the block): a committed hint whose install names a binary that does not
+    # exist must REFUSE `install_failed` naming the command, never raise an uncaught
+    # OSError traceback (the one shape review run promises never to give).
+    repo, _ = _pkg_repo(tmp_path, test_body=PASS_TEST)
+    (repo / ".review-install").write_text(
+        "install = /nonexistent/binary --boom\npackage = demo_pkg\n"
+    )
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-q", "-m", "bad hint")
+    head = _git(repo, "rev-parse", "HEAD")
+    head_tree = _git(repo, "rev-parse", "HEAD^{tree}")
+    _write_marker(repo, head, head_tree)
+    with pytest.raises(rr.ReviewRunRefused) as exc:
+        rr.run_review_lane(repo, pytest_args=["-q"])
+    assert exc.value.code == "install_failed", exc.value.code
+    assert "/nonexistent/binary" in exc.value.detail
+
+
+def test_receipt_records_install_command_and_sources(tmp_path: Path):
+    # P7: a hint-driven run and a flag-driven run must NOT render identical receipts.
+    # Hint run: source is `hint`, and install_command shows the substituted command.
+    repo, _ = _pkg_repo(tmp_path, test_body=PASS_TEST)
+    (repo / ".review-install").write_text(
+        f"install = {_hint_install_string()}\npackage = demo_pkg\n"
+    )
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-q", "-m", "hint")
+    _write_marker(repo, _git(repo, "rev-parse", "HEAD"), _git(repo, "rev-parse", "HEAD^{tree}"))
+    rcpt = rr.run_review_lane(repo, pytest_args=["-q"])
+    assert rcpt["result"] == "green", rcpt
+    assert rcpt["install_source"] == "hint", rcpt["install_source"]
+    assert rcpt["package_source"] == "hint", rcpt["package_source"]
+    assert any(str(repo / "src") in tok for tok in rcpt["install_command"]), rcpt["install_command"]
+
+    # Flag run on a fresh lane: source is `flag`.
+    repo2, head_tree2 = _pkg_repo(tmp_path / "second", test_body=PASS_TEST)
+    _write_marker(repo2, _git(repo2, "rev-parse", "HEAD"), head_tree2)
+    rcpt2 = rr.run_review_lane(
+        repo2, package="demo_pkg", install=_offline_install(repo2), pytest_args=["-q"]
+    )
+    assert rcpt2["result"] == "green", rcpt2
+    assert rcpt2["install_source"] == "flag", rcpt2["install_source"]
+    assert rcpt2["package_source"] == "flag", rcpt2["package_source"]
+
+
+def test_unknown_hint_key_refuses_bad_hint(tmp_path: Path):
+    # P1: a typo'd key (`instal`) must refuse `bad_hint` naming the key, not fall
+    # through to the default install and refuse under a cause the repo never declared.
+    repo, _ = _pkg_repo(tmp_path, test_body=PASS_TEST)
+    (repo / ".review-install").write_text("instal = whoops\npackage = demo_pkg\n")
+    with pytest.raises(rr.ReviewRunRefused) as exc:
+        rr.read_install_hint(repo)
+    assert exc.value.code == "bad_hint", exc.value.code
+    assert "instal" in exc.value.detail
+
+
+# ------------------------------------- follow-on: undeclared extra (pip exits 0)
+
+def test_detect_undeclared_extras_parses_pip_warning():
+    # The pure detector: pip's real warning (captured from pip 25 against a package
+    # with no extras), older pip's version-less spelling, and a clean install (none).
+    out = (
+        "Obtaining file:///x\n"
+        "WARNING: demo_pkg 0.0.0 does not provide the extra 'alsobad'\n"
+        "WARNING: demo_pkg 0.0.0 does not provide the extra 'bogus'\n"
+        "Successfully installed demo_pkg-0.0.0\n"
+    )
+    assert rr.detect_undeclared_extras(out) == ["alsobad", "bogus"]  # sorted, unique
+    assert rr.detect_undeclared_extras(
+        "WARNING: pkg does not provide the extra 'x'"  # older pip: no version
+    ) == ["x"]
+    assert rr.detect_undeclared_extras("Successfully installed demo_pkg-0.0.0") == []
+
+
+def _install_no_pytest_with_undeclared_extra_warning(lane: Path, extra: str) -> list[str]:
+    """Like `_offline_install_no_pytest` (brings the package, NOT pytest) but also
+    prints pip's real undeclared-extra WARNING on stderr and exits 0 — the exact
+    shape of `pip install -e <lane>[<extra>]` when <extra> is a typo: pip warns,
+    exits 0, and installs none of that extra's dependencies."""
+    vpy = lane / rr._VENV_DIRNAME / "bin" / "python"
+    script = (
+        _SEED_SCRIPT
+        + ";import sys;sys.stderr.write("
+        + repr(f"WARNING: demo_pkg 0.0.0 does not provide the extra '{extra}'\n")
+        + ")"
+    )
+    return [str(vpy), "-c", script, str(lane / "src")]
+
+
+def test_run_refuses_undeclared_extra_naming_it_before_pytest(tmp_path: Path):
+    # Root-cause naming. This is the SAME scenario as the pytest-absent test — the
+    # install brings the package but not pytest — except the install ALSO emits pip's
+    # undeclared-extra warning (a typo'd `[devv]`). The undeclared-extra check fires
+    # first, so the run refuses `undeclared_extra` naming `devv` instead of the
+    # misleading `pytest_not_installed` the reviewer would otherwise chase. Removing
+    # the (4a) block flips this to `pytest_not_installed` (mutation witness).
+    repo, head_tree = _pkg_repo(tmp_path, test_body=PASS_TEST)
+    _write_marker(repo, _git(repo, "rev-parse", "HEAD"), head_tree)
+    with pytest.raises(rr.ReviewRunRefused) as exc:
+        rr.run_review_lane(
+            repo, package="demo_pkg", pytest_args=["-q"],
+            install=_install_no_pytest_with_undeclared_extra_warning(repo, "devv"),
+        )
+    assert exc.value.code == "undeclared_extra", exc.value.code
+    assert "devv" in exc.value.detail
+
+
+def test_spaced_lane_path_survives(tmp_path: Path):
+    # P2: split the template FIRST, then substitute per token, so a lane path with a
+    # space survives even with an unquoted {venv}/{lane} in the hint line. The prior
+    # code substituted before shlex.split, so the space broke the token apart; this
+    # test's helper writes the placeholders UNQUOTED (only the seed script + host
+    # paths are quoted), which the earlier author suite's shlex.join helper could not.
+    spaced = tmp_path / "has space"
+    spaced.mkdir()
+    repo, _ = _pkg_repo(spaced, test_body=PASS_TEST)
+    assert " " in str(repo), str(repo)
+    host = [shlex.quote(p) for p in sys.path if p]
+    hint_install = " ".join(
+        ["{venv}", "-c", shlex.quote(_SEED_SCRIPT), "{lane}/src", *host]
+    )
+    (repo / ".review-install").write_text(f"install = {hint_install}\npackage = demo_pkg\n")
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-q", "-m", "spaced hint")
+    _write_marker(repo, _git(repo, "rev-parse", "HEAD"), _git(repo, "rev-parse", "HEAD^{tree}"))
+    rcpt = rr.run_review_lane(repo, pytest_args=["-q"])
+    assert rcpt["result"] == "green", rcpt
+    assert rcpt["passed"] >= 1

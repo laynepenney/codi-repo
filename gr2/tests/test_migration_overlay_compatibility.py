@@ -7,7 +7,7 @@ import pytest
 import yaml
 
 from gr2.python_cli.migration import detect_gr1_workspace, workspace_status
-from gr2_overlay.agent_manifest import (
+from gr2.overlay.agent_manifest import (
     AgentManifest,
     AgentManifestValidationError,
     read_workspace_repo_agent_manifest,

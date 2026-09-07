@@ -4,8 +4,8 @@ import subprocess
 import tomllib
 from pathlib import Path
 
-from gr2_overlay.objects import apply_overlay_object, capture_overlay_object
-from gr2_overlay.types import OverlayMeta, OverlayRef, OverlayTier, TrustLevel
+from gr2.overlay.objects import apply_overlay_object, capture_overlay_object
+from gr2.overlay.types import OverlayMeta, OverlayRef, OverlayTier, TrustLevel
 
 
 def test_capture_serializes_attached_head_state_per_repo_in_metadata(tmp_path: Path) -> None:

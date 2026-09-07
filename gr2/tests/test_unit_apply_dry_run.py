@@ -9,7 +9,7 @@ import pytest
 def test_preview_unit_apply_reports_repo_order_and_manifest_surface_without_mutation(
     tmp_path: Path,
 ) -> None:
-    from gr2_overlay.units import preview_unit_apply
+    from gr2.overlay.units import preview_unit_apply
 
     workspace_root = tmp_path / "workspace"
     _write_manifest(
@@ -60,7 +60,7 @@ overlay_source_value = "team/feature-auth"
 
 
 def test_preview_unit_apply_rejects_missing_manifest(tmp_path: Path) -> None:
-    from gr2_overlay.units import preview_unit_apply
+    from gr2.overlay.units import preview_unit_apply
 
     workspace_root = tmp_path / "workspace"
     workspace_root.mkdir()
@@ -70,7 +70,7 @@ def test_preview_unit_apply_rejects_missing_manifest(tmp_path: Path) -> None:
 
 
 def test_preview_unit_apply_rejects_manifest_with_unknown_failure_policy(tmp_path: Path) -> None:
-    from gr2_overlay.units import preview_unit_apply
+    from gr2.overlay.units import preview_unit_apply
 
     workspace_root = tmp_path / "workspace"
     _write_manifest(

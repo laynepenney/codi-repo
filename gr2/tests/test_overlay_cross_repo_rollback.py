@@ -5,17 +5,17 @@ from pathlib import Path
 
 import pytest
 
-from gr2_overlay.activate import OverlayActivationError, activate_overlay, deactivate_overlay
-from gr2_overlay.objects import capture_overlay_object
-from gr2_overlay.trust import write_workspace_allowlist
-from gr2_overlay.types import OverlayMeta, OverlayRef, OverlayTier, TrustLevel
+from gr2.overlay.activate import OverlayActivationError, activate_overlay, deactivate_overlay
+from gr2.overlay.objects import capture_overlay_object
+from gr2.overlay.trust import write_workspace_allowlist
+from gr2.overlay.types import OverlayMeta, OverlayRef, OverlayTier, TrustLevel
 
 
 def test_rollback_restores_every_touched_repo_after_partial_second_repo_mutation(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    import gr2_overlay.cross_repo as cross_repo
+    import gr2.overlay.cross_repo as cross_repo
 
     overlay_ref = OverlayRef(author="atlas", name="workspace-bundle")
     app_store, app_workspace, app_source = _triplet(tmp_path, "app")
@@ -87,7 +87,7 @@ def test_rollback_does_not_leave_cross_repo_transaction_artifacts_behind(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    import gr2_overlay.cross_repo as cross_repo
+    import gr2.overlay.cross_repo as cross_repo
 
     overlay_ref = OverlayRef(author="atlas", name="workspace-bundle")
     app_store, app_workspace, app_source = _triplet(tmp_path, "app")
@@ -147,7 +147,7 @@ def test_rollback_does_not_leave_cross_repo_transaction_artifacts_behind(
 
 
 def test_snapshot_handles_binary_files_without_crashing(tmp_path: Path) -> None:
-    from gr2_overlay.cross_repo import _restore_snapshot, _snapshot
+    from gr2.overlay.cross_repo import _restore_snapshot, _snapshot
 
     root = tmp_path / "workspace"
     root.mkdir()

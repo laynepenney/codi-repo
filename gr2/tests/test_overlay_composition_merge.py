@@ -5,13 +5,13 @@ from pathlib import Path
 
 import pytest
 
-from gr2_overlay.objects import capture_overlay_object
-from gr2_overlay.trust import write_workspace_allowlist
-from gr2_overlay.types import OverlayMeta, OverlayRef, OverlayTier, TrustLevel
+from gr2.overlay.objects import capture_overlay_object
+from gr2.overlay.trust import write_workspace_allowlist
+from gr2.overlay.types import OverlayMeta, OverlayRef, OverlayTier, TrustLevel
 
 
 def test_reapplying_same_overlay_stack_is_deterministic_across_remerge(tmp_path: Path) -> None:
-    from gr2_overlay.cross_repo import RepoOverlayTarget, activate_overlays_atomically
+    from gr2.overlay.cross_repo import RepoOverlayTarget, activate_overlays_atomically
 
     base_ref = OverlayRef(author="atlas", name="base-theme")
     feature_ref = OverlayRef(author="atlas", name="feature-theme")
@@ -81,7 +81,7 @@ def test_reapplying_same_overlay_stack_is_deterministic_across_remerge(tmp_path:
 
 
 def test_cross_repo_composition_conflict_is_explicit_and_non_partial(tmp_path: Path) -> None:
-    from gr2_overlay.cross_repo import (
+    from gr2.overlay.cross_repo import (
         CrossRepoActivationError,
         RepoOverlayTarget,
         activate_overlays_atomically,

@@ -39,7 +39,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from . import gitops
-from .clone_exec import CloneExecutionError
+from .clone_exec import CloneExecutionError, IncompleteRemoval, rmtree_or_refuse
 from .gitops import ensure_lane_checkout
 
 _SHA40 = re.compile(r"\A[0-9a-f]{40}\Z")
@@ -262,7 +262,14 @@ def open_review_lane(
         lane_head = gitops.git(lane_repo_root, "rev-parse", "HEAD")
         if lane_head.returncode != 0 or lane_head.stdout.strip() != expected_head_sha:
             if first_materialize:
-                shutil.rmtree(lane_repo_root, ignore_errors=True)
+                try:
+                    rmtree_or_refuse(lane_repo_root)
+                except IncompleteRemoval as cleanup_exc:
+                    raise ReviewError(
+                        f"review-ephemeral lane is at {lane_head.stdout.strip()!r}, not the "
+                        f"expected head {expected_head_sha}, AND it could not be fully "
+                        f"discarded: {cleanup_exc}"
+                    ) from cleanup_exc
             raise ReviewError(
                 f"review-ephemeral lane is at {lane_head.stdout.strip()!r}, not the expected "
                 f"head {expected_head_sha}; lane discarded"
@@ -304,7 +311,14 @@ def open_review_lane(
     lane_head = gitops.git(lane_repo_root, "rev-parse", "HEAD")
     if lane_head.returncode != 0 or lane_head.stdout.strip() != expected_head_sha:
         if first_materialize:
-            shutil.rmtree(lane_repo_root, ignore_errors=True)
+            try:
+                rmtree_or_refuse(lane_repo_root)
+            except IncompleteRemoval as cleanup_exc:
+                raise ReviewError(
+                    f"freshly materialized lane is at {lane_head.stdout.strip()!r}, not "
+                    f"the expected head {expected_head_sha}, AND it could not be fully "
+                    f"discarded: {cleanup_exc}"
+                ) from cleanup_exc
             raise ReviewError(
                 f"freshly materialized lane is at {lane_head.stdout.strip()!r}, not the "
                 f"expected head {expected_head_sha}; lane discarded"

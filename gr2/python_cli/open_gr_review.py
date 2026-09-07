@@ -14,13 +14,18 @@ from __future__ import annotations
 import dataclasses
 import json
 import os
+import re
+import shutil
 import subprocess
 from pathlib import Path
 
 from gr2.prototypes import lane_workspace_prototype as lane_proto
 
 from . import grip, project_review, review
+from .clone_exec import IncompleteRemoval, rmtree_or_refuse
 from .gitops import git
+from .review_run import _OUTPUT_LOG_NAME as _RUN_LOG_NAME
+from .review_run import _RECEIPT_NAME as _RUN_RECEIPT_NAME
 
 
 class OpenGrReviewError(Exception):
@@ -62,8 +67,6 @@ def close_open_gr_lane(lane_dir: Path) -> dict:
     the disposable tree. Refuses a directory with no open-gr marker (so a wrong
     ``--lane-dir`` can never remove an arbitrary path). No OWNER_UNIT, no lane pop,
     no cwd restore -- open-gr did none of those, so teardown undoes only the clone."""
-    import shutil
-
     lane_dir = Path(lane_dir)
     marker_path = lane_dir / _OPEN_GR_MARKER
     if not marker_path.exists():
@@ -79,8 +82,64 @@ def close_open_gr_lane(lane_dir: Path) -> dict:
             f"(kind={marker.get('kind')!r})"
         )
     gr_commit = marker.get("gr_commit", "")
-    shutil.rmtree(lane_dir, ignore_errors=True)
-    return {"reclaimed": str(lane_dir), "gr_commit": gr_commit}
+    # review-run door 1: `review run` writes its receipt and pytest-output log INSIDE
+    # the lane, so the rmtree below would destroy the only record of what a red run
+    # found (35 env failures, in the real review). Carry them OUT first, to a sibling
+    # beside the lane that the rmtree cannot reach, and rewrite the preserved receipt's
+    # `output_log` to the preserved log's path so the receipt still names its log.
+    preserved = _preserve_run_artifacts(lane_dir)
+    try:
+        rmtree_or_refuse(lane_dir)
+    except IncompleteRemoval as cleanup_exc:
+        raise OpenGrReviewError(
+            f"open-gr lane at {lane_dir} could not be fully reclaimed: {cleanup_exc}"
+        ) from cleanup_exc
+    result = {"reclaimed": str(lane_dir), "gr_commit": gr_commit}
+    if preserved:
+        result["preserved_run"] = preserved
+    return result
+
+
+def _preserve_run_artifacts(lane_dir: Path) -> dict | None:
+    """Copy a `review run` receipt (and its output log) out of the lane into a sibling
+    dir that the lane's rmtree cannot reach, BEFORE the rmtree. Returns
+    ``{"dir", "receipt", "log"?}`` of the preserved paths, or None when the lane holds
+    no run receipt (the run was never done). The preserved receipt's ``output_log`` is
+    rewritten to the preserved log path, so the surviving receipt still names its log."""
+    receipt_src = lane_dir / _RUN_RECEIPT_NAME
+    if not receipt_src.is_file():
+        return None
+    # Sibling of the lane (NOT under it), `.resolve()` so it is a true sibling even when
+    # lane_dir was passed relative.
+    lane_dir = lane_dir.resolve()
+    receipt = json.loads(receipt_src.read_text())
+    # Key the preserved dir by (gr short commit, run timestamp), both taken from the
+    # receipt the run wrote. Keying only by lane name let a SECOND close of the same
+    # lane name overwrite the first close's receipt and log in place, so door 1's
+    # "the evidence survives close" held for one close per lane name only. A distinct
+    # run (a reopen + rerun) has a distinct `created`, so it lands beside the first
+    # rather than on top of it; the same run closed twice is idempotent.
+    gr_short = (receipt.get("gr_commit") or "unknown")[:12]
+    created = receipt.get("created") or "no-timestamp"
+    key = re.sub(r"[^A-Za-z0-9._-]", "-", f"{gr_short}-{created}")
+    dest = lane_dir.parent / f"{lane_dir.name}.review-run" / key
+    dest.mkdir(parents=True, exist_ok=True)
+    out: dict[str, str] = {"dir": str(dest)}
+
+    log_src = lane_dir / _RUN_LOG_NAME
+    log_dest = dest / _RUN_LOG_NAME
+    if log_src.is_file():
+        shutil.copy2(log_src, log_dest)
+        out["log"] = str(log_dest)
+
+    # Point the surviving receipt at the surviving log (absolute), since the lane-
+    # relative name it carried will not exist after the rmtree.
+    if "log" in out:
+        receipt["output_log"] = out["log"]
+    receipt_dest = dest / _RUN_RECEIPT_NAME
+    receipt_dest.write_text(json.dumps(receipt, indent=2) + "\n")
+    out["receipt"] = str(receipt_dest)
+    return out
 
 
 def _pin_transport_location(pin_repo: str) -> str:
@@ -309,8 +368,14 @@ def open_gr_enter(
         )
     finally:
         if scratch_root is not None:
-            import shutil
-            shutil.rmtree(scratch_root, ignore_errors=True)
+            # Log-and-continue, deliberately: this finally spans whatever the try
+            # block just did (opened a review, or raised) and a leftover scratch
+            # clone must never mask either outcome by raising here instead.
+            try:
+                rmtree_or_refuse(scratch_root)
+            except IncompleteRemoval as cleanup_exc:
+                import sys
+                print(f"warning: {cleanup_exc}", file=sys.stderr)
     if outcome.status != "opened" or outcome.review_root is None:
         # Refusal / partial propagates unchanged; no receipt, no enter to unwind.
         return outcome
@@ -620,8 +685,13 @@ def exit_gr_review(
     # cleanup (no prune verb that could ever touch a work lane). The mirror
     # persists; only the disposable review clones are removed.
     if receipt.get("lane_kind") == "review-ephemeral":
-        import shutil
-        shutil.rmtree(review_root, ignore_errors=True)
+        try:
+            rmtree_or_refuse(review_root)
+        except IncompleteRemoval as cleanup_exc:
+            raise OpenGrReviewError(
+                f"review-ephemeral lane at {review_root} could not be fully "
+                f"removed on exit: {cleanup_exc}"
+            ) from cleanup_exc
     return OpenGrExit(
         restored_lane=restored_lane,
         restored_cwd=receipt["prior_cwd"],

@@ -10,7 +10,7 @@ def test_abort_unit_rolls_back_inflight_transaction_and_clears_state(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    import gr2_overlay.units as units
+    import gr2.overlay.units as units
 
     workspace_root = tmp_path / "workspace"
     _write_inflight_state(
@@ -41,7 +41,7 @@ def test_abort_unit_rolls_back_inflight_transaction_and_clears_state(
 
 
 def test_abort_unit_rejects_missing_inflight_state(tmp_path: Path) -> None:
-    from gr2_overlay.units import abort_unit
+    from gr2.overlay.units import abort_unit
 
     workspace_root = tmp_path / "workspace"
     workspace_root.mkdir()
@@ -54,7 +54,7 @@ def test_abort_unit_preserves_state_file_when_rollback_fails(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    import gr2_overlay.units as units
+    import gr2.overlay.units as units
 
     workspace_root = tmp_path / "workspace"
     state_path = _write_inflight_state(
@@ -80,7 +80,7 @@ def test_abort_unit_preserves_state_file_when_rollback_fails(
 
 
 def test_rollback_inflight_unit_restores_repo_snapshots(tmp_path: Path) -> None:
-    from gr2_overlay.units import rollback_inflight_unit
+    from gr2.overlay.units import rollback_inflight_unit
 
     workspace_root = tmp_path / "workspace"
     app_root = workspace_root / "repos" / "app"

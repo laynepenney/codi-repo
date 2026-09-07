@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from gr2_overlay.trust import (
+from gr2.overlay.trust import (
     OverlayTrustError,
     TrustClass,
     TrustSource,
@@ -14,7 +14,7 @@ from gr2_overlay.trust import (
     load_workspace_allowlist,
     trust_config_path,
 )
-from gr2_overlay.types import OverlayRef
+from gr2.overlay.types import OverlayRef
 
 
 def test_trust_config_lives_in_workspace_grip_directory(tmp_path: Path) -> None:

@@ -22,13 +22,72 @@ from __future__ import annotations
 import json
 import os
 import re
+import shlex
 import subprocess
 import sys
 import tempfile
+from datetime import datetime, timezone
 from pathlib import Path
+
+# An in-repo hint read when `--install` is omitted. It lives at the REPO ROOT
+# (the lane), NOT in a pyproject table, on purpose: a repo whose importable
+# package is a SUBDIR (grip's is `gr2/`) has no top-level pyproject, which is the
+# exact case the default `pip install -e <lane>` cannot handle — so a pyproject
+# hint would be unreadable precisely where it is needed. A root sentinel file
+# works regardless of where the package lives. Format: `key = value` lines, `#`
+# comments; keys `install` (a command with {venv} and {lane} placeholders,
+# shell-split FIRST, then {venv}/{lane} substituted per token — so a lane path with
+# a space stays one token) and optional `package` (the import name whose __file__
+# must resolve under the lane).
+_HINT_NAME = ".review-install"
+
+
+_HINT_KEYS = frozenset({"install", "package"})
+
+
+def _apply_install_placeholders(tokens: list[str], venv_python: Path, repo_dir: Path) -> list[str]:
+    """Substitute `{venv}` and `{lane}` per token, so a lane path containing a space
+    stays one token (substituting before shell-splitting would let the space break the
+    token apart). The single substitution point shared by the --install flag and the
+    .review-install hint, so both accept the identical template (review-run door 2)."""
+    return [
+        tok.replace("{venv}", str(venv_python)).replace("{lane}", str(repo_dir))
+        for tok in tokens
+    ]
+
+
+def read_install_hint(repo_dir: Path) -> dict | None:
+    """Parse `<repo_dir>/.review-install`; return {'install': str, 'package': str}
+    (both optional keys) or None when the file is absent. An unrecognised key is a
+    REFUSAL (`bad_hint`), not a silent skip: a typo like `instal = ...` would
+    otherwise fall through to the default install and refuse under a cause the repo
+    never declared."""
+    p = repo_dir / _HINT_NAME
+    if not p.is_file():
+        return None
+    out: dict[str, str] = {}
+    for raw in p.read_text().splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, val = line.partition("=")
+        key = key.strip()
+        if key not in _HINT_KEYS:
+            raise ReviewRunRefused(
+                "bad_hint",
+                f"unrecognised key {key!r} in {p}; allowed keys are "
+                f"{sorted(_HINT_KEYS)}",
+            )
+        out[key] = val.strip()
+    return out
 
 _MARKER_NAME = ".grip-open-gr-reconstruct.json"
 _RECEIPT_NAME = ".grip-review-run.json"
+# The full pytest output, persisted beside the receipt. The receipt's counts and
+# `failed_ids` say WHAT failed; this file is the raw text a reviewer reads to see
+# WHY. Named so `close-gr` can carry it (and the receipt) out before it reclaims
+# the lane (review-run door 1).
+_OUTPUT_LOG_NAME = ".grip-review-run.log"
 _VENV_DIRNAME = ".venv"
 
 
@@ -171,6 +230,26 @@ def assert_import_under_lane(resolved_file: str, lane_dir: Path) -> None:
         )
 
 
+# ---- undeclared-extra detection (pip exits 0 but warns) ----
+
+# pip exits 0 when an install requests an extra the package does not declare,
+# emitting `WARNING: <name> <version> does not provide the extra 'X'` on stderr
+# (older pip omits the version). The invariant is the phrase, so anchor on it and
+# ignore the version. Match either quote style pip might use.
+_UNDECLARED_EXTRA_RE = re.compile(r"""does not provide the extra ['"]([^'"]+)['"]""")
+
+
+def detect_undeclared_extras(output: str) -> list[str]:
+    """Return the sorted unique extra names pip reported as undeclared in `output`.
+
+    A typo'd or undeclared extra in a repo's own `.review-install` (say `gr2[devv]`
+    for `gr2[dev]`) makes pip install NOTHING of what that extra promised — pytest
+    and the rest of the test deps — while exiting 0. The run then fails later under
+    `pytest_not_installed`, which points at the symptom, not the bad extra name. This
+    lets the run name the root cause first."""
+    return sorted({m.group(1) for m in _UNDECLARED_EXTRA_RE.finditer(output)})
+
+
 # ---- pytest summary parsing (counts from the summary line, not exit code) ----
 
 _COLLECTED_RE = re.compile(r"collected (\d+) item")
@@ -241,6 +320,78 @@ def parse_pytest_summary(stdout: str) -> dict | None:
     }
 
 
+# ---- failed-test node ids (which tests failed, not just how many) -----------
+
+# pytest's short test summary info section (emitted under `-rfE`, which the run
+# always passes) lists one line per non-passing outcome:
+#   FAILED tests/test_x.py::test_bad - AssertionError: ...
+#   FAILED tests/test_x.py::test_p[case 2 with spaces] - AssertionError
+#   ERROR tests/test_x.py::test_y - fixture 'conn' not found   (setup/collection)
+# The node id is everything between the status word and pytest's ` - <message>`
+# separator (space-dash-space), or the rest of the line when there is no message.
+# A `\S+` token would truncate a PARAMETRIZED id at the first space inside its
+# brackets, losing the exact case a reviewer must re-run — so match to the ` - `
+# instead. Anchored at line start (MULTILINE) so the `ERRORS` banner and the
+# `___ ERROR at setup of ___` divider lines, which do not start with the word, are
+# not mistaken for summary rows. review-run door 1: the 35 env failures in the
+# real review were unrecoverable from the receipt because this was never captured.
+# Known edge: a param whose brackets literally contain " - " (space-dash-space)
+# truncates there, since that is also the id/message separator; pytest usually
+# sanitizes such ids and the truncation still keeps the file and test stem, so it
+# is accepted rather than guarded.
+_FAILED_ID_RE = re.compile(r"^(?:FAILED|ERROR)\s+(.+?)(?: - .*)?$", re.MULTILINE)
+
+
+def parse_failed_ids(output: str) -> list[str]:
+    """Return the sorted unique node ids pytest reported as FAILED or ERROR in
+    `output`'s short test summary. A count of failures with no ids is a dead end
+    for a reviewer; this is the path back to the exact tests to re-run."""
+    return sorted({m.group(1) for m in _FAILED_ID_RE.finditer(output)})
+
+
+def merge_report_flags(pytest_args: list[str]) -> list[str]:
+    """Return `pytest_args` with a single `-r` spec GUARANTEED to make the short test
+    summary list every FAILED and ERROR node id for parse_failed_ids.
+
+    Two pytest facts drive this and neither is `-r`-is-additive:
+      * `-r` is LAST-WINS across tokens, so a prepended `-rfE` is silently overridden
+        by any later caller `-r` — failed_ids then comes back EMPTY on a real red run.
+      * within one `-r` spec, the chars are processed IN ORDER and `N` (none) CLEARS
+        everything before it. So a sorted union like `-rENf` loses ERROR: E is added,
+        N clears it, f is added — a red run with an ERROR-at-setup keeps FAILED and
+        drops the ERROR ids. (Measured: `-rfE` prints both, `-rENf` FAILED only.)
+
+    So: collect the caller's `-r` chars in ORDER (deduped), DROP `N` (the run requires
+    output, so "none" cannot stand), drop any caller f/E, then append `f` and `E` LAST
+    so nothing that follows can clear them. `a`/`A` (all / all-but-passed) stay, ahead
+    of f/E, and are harmless supersets."""
+    required = ("f", "E")
+    caller_seq: list[str] = []
+    seen: set[str] = set()
+    rest: list[str] = []
+    i = 0
+    while i < len(pytest_args):
+        a = pytest_args[i]
+        chars: str | None = None
+        if a == "-r" and i + 1 < len(pytest_args):  # `-r fE` (separate arg)
+            chars = pytest_args[i + 1]
+            i += 2
+        elif a.startswith("-r") and len(a) > 2:  # `-rfE` (attached)
+            chars = a[2:]
+            i += 1
+        else:
+            rest.append(a)
+            i += 1
+            continue
+        for c in chars:
+            if c not in seen:
+                seen.add(c)
+                caller_seq.append(c)
+    ordered = [c for c in caller_seq if c not in ("N", *required)]
+    ordered.extend(required)
+    return ["-r" + "".join(ordered), *rest]
+
+
 # ---- the verb ---------------------------------------------------------------
 
 def _read_marker(lane_dir: Path) -> dict:
@@ -262,7 +413,7 @@ def _read_marker(lane_dir: Path) -> dict:
 def run_review_lane(
     lane_dir: Path,
     *,
-    package: str,
+    package: str | None = None,
     pytest_args: list[str],
     python: str | None = None,
     install: list[str] | None = None,
@@ -305,26 +456,112 @@ def run_review_lane(
         raise ReviewRunRefused("venv_failed", f"venv create failed: {proc.stderr.strip()}")
     venv_python = venv_dir / "bin" / "python"
 
-    # (3) install the reconstructed tree editable.
-    install_cmd = install or [str(venv_python), "-m", "pip", "install", "-e", str(repo_dir)]
-    proc = subprocess.run(install_cmd, text=True, capture_output=True, cwd=str(repo_dir))
+    # (3) resolve install + package, tracking WHERE each came from. An explicit
+    #     --install/--package always wins; otherwise the repo's own .review-install
+    #     hint supplies them, so a repo that declares itself (like grip, whose package
+    #     is the gr2/ subdir) needs no hand-written flags. The hint's install template
+    #     is SHELL-SPLIT FIRST, then {venv}/{lane} substituted per token, so a lane
+    #     path containing a space stays one token even with an unquoted hint line
+    #     (substituting before splitting would let the space break the token apart).
+    install_source = "flag" if install is not None else None
+    package_source = "flag" if package is not None else None
+    hint = read_install_hint(repo_dir)
+    if install is not None:
+        # The --install FLAG supports the SAME {venv}/{lane} placeholders as the hint,
+        # so the documented template works identically whether typed on the CLI or
+        # declared in .review-install. review-run door 2: only the hint substituted, so
+        # a reviewer who passed the documented `{venv} -m pip install -e {lane}` on the
+        # flag got literal braces and a failed install.
+        install = _apply_install_placeholders(install, venv_python, repo_dir)
+    elif hint and hint.get("install"):
+        install = _apply_install_placeholders(shlex.split(hint["install"]), venv_python, repo_dir)
+        install_source = "hint"
+    if package is None and hint and hint.get("package"):
+        package = hint["package"]
+        package_source = "hint"
+    if package is None:
+        raise ReviewRunRefused(
+            "no_package",
+            "no --package given and the lane's .review-install declares none; a "
+            "package name is required so the install can be proven to resolve under "
+            "the lane",
+        )
+
+    # (4) install the reconstructed tree editable. A hint (or flag) can name a binary
+    #     that does not exist; subprocess.run then raises OSError, which must become a
+    #     refusal, never an uncaught traceback (tree content chooses the command, so a
+    #     typo in a repo's own hint must not produce the one shape review run promises
+    #     never to give).
+    if install is not None:
+        install_cmd = install
+    else:
+        install_cmd = [str(venv_python), "-m", "pip", "install", "-e", str(repo_dir)]
+        install_source = "default"
+    try:
+        proc = subprocess.run(install_cmd, text=True, capture_output=True, cwd=str(repo_dir))
+    except OSError as exc:
+        raise ReviewRunRefused(
+            "install_failed",
+            f"install `{' '.join(install_cmd)}` could not run: {exc}",
+        )
     if proc.returncode != 0:
         raise ReviewRunRefused(
             "install_failed",
             f"install `{' '.join(install_cmd)}` failed: {proc.stderr.strip()[-800:]}",
         )
 
-    # (4) IMPORT UNDER THE LANE — in the same env pytest will use.
+    # (4a) An undeclared extra does NOT fail the install — pip warns and exits 0,
+    #      installing none of that extra's dependencies. Named here, BEFORE the import
+    #      and pytest checks, so a typo'd extra surfaces as its own root cause instead
+    #      of the misleading `pytest_not_installed` symptom it would otherwise produce.
+    undeclared = detect_undeclared_extras(proc.stdout + "\n" + proc.stderr)
+    if undeclared:
+        raise ReviewRunRefused(
+            "undeclared_extra",
+            "the install requested extra(s) the package does not declare: "
+            f"{', '.join(undeclared)}. pip exits 0 on an undeclared extra and installs "
+            "nothing for it, so the test dependencies it was meant to bring (pytest and "
+            "the rest) are silently absent. Fix the extra name in --install or the "
+            f"repo's .review-install. install: `{' '.join(install_cmd)}`",
+        )
+
+    # (5) IMPORT UNDER THE LANE — in the same env pytest will use.
     run_env = {**os.environ}
     resolved_file = resolve_import_file(venv_python, package, run_env)
     assert_import_under_lane(resolved_file, lane_dir)
 
-    # (5) run pytest; counts from the summary line, never the exit code.
-    test_cmd = [str(venv_python), "-m", "pytest", *pytest_args]
+    # (6) pytest must be importable in the lane venv. A plain editable install does
+    #     not bring it (pytest is a test-time extra), and running pytest anyway
+    #     yields exit 1 with no summary — which the summary check would mislabel
+    #     `unparseable_summary`. Name the real cause instead, and keep it a refusal.
+    proc = subprocess.run(
+        [str(venv_python), "-c", "import pytest"], text=True, capture_output=True, env=run_env
+    )
+    if proc.returncode != 0:
+        raise ReviewRunRefused(
+            "pytest_not_installed",
+            "pytest is not importable in the lane venv; a plain editable install does "
+            "not bring it. Add pytest to --install or the repo's .review-install "
+            f"(it is a test-time dependency). stderr: {proc.stderr.strip()[-300:]}",
+        )
+
+    # (7) run pytest; counts from the summary line, never the exit code. The full
+    #     output is persisted to a log in the lane and the failed node ids are parsed
+    #     from it, so a red receipt says WHICH tests failed and the raw text survives
+    #     for close-gr to carry out (review-run door 1).
+    # Guarantee the short test summary lists every FAILED/ERROR node id for
+    # parse_failed_ids. pytest emits those summary lines only under `-r`, and `-r` is
+    # LAST-WINS: a prepended `-rfE` would be silently overridden by a caller `-rN`/`-rs`,
+    # leaving failed_ids empty on a real red run. merge_report_flags folds f/E INTO the
+    # caller's own -r chars, so f and E survive whatever the caller passed.
+    test_cmd = [str(venv_python), "-m", "pytest", *merge_report_flags(pytest_args)]
     proc = subprocess.run(
         test_cmd, text=True, capture_output=True, cwd=str(repo_dir), env=run_env
     )
-    summary = parse_pytest_summary(proc.stdout + "\n" + proc.stderr)
+    pytest_output = proc.stdout + "\n" + proc.stderr
+    (lane_dir / _OUTPUT_LOG_NAME).write_text(pytest_output)
+    failed_ids = parse_failed_ids(pytest_output)
+    summary = parse_pytest_summary(pytest_output)
     if summary is None:
         raise ReviewRunRefused(
             "unparseable_summary",
@@ -353,11 +590,18 @@ def run_review_lane(
     )
     receipt = {
         "kind": "review-run",
+        # When this run happened, so close-gr can key the preserved evidence by
+        # (gr commit, run time) and two closes of the same lane name do not overwrite
+        # each other's receipt/log.
+        "created": datetime.now(timezone.utc).isoformat(),
         "gr_commit": marker.get("gr_commit", ""),
         "bound_head": repo.get("bound_head", ""),
         "bound_head_tree": bound_tree,
         "interpreter": {"path": str(venv_python), "version": version},
         "resolved_install_path": resolved_file,
+        "install_command": install_cmd,
+        "install_source": install_source,
+        "package_source": package_source,
         "test_command": test_cmd,
         "collected": summary["collected"],
         "deselected": summary["deselected"],
@@ -367,6 +611,10 @@ def run_review_lane(
         "skipped": summary["skipped"],
         "xfailed": summary["xfailed"],
         "errors": summary["errors"],
+        # WHICH tests failed (node ids parsed from the summary), so a red receipt is
+        # actionable and not just a count, and the raw output log this run wrote.
+        "failed_ids": failed_ids,
+        "output_log": _OUTPUT_LOG_NAME,
         "result": result,
     }
     (lane_dir / _RECEIPT_NAME).write_text(json.dumps(receipt, indent=2) + "\n")
