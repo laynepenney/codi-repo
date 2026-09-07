@@ -6,7 +6,8 @@
 # lets a reviewer run `gr2 review run <lane>` on a grip lane with no hand-written
 # --install/--package.
 #
-# {venv} = the lane venv's python; {lane} = the lane (repo root). Substituted,
-# then shell-split.
+# {venv} = the lane venv's python; {lane} = the lane (repo root). The line is
+# shell-split first, then {venv}/{lane} substituted per token (so a lane path with
+# a space stays one token).
 install = {venv} -m pip install -e {lane}/gr2[dev]
 package = gr2_overlay

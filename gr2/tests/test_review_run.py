@@ -422,6 +422,57 @@ def test_unknown_hint_key_refuses_bad_hint(tmp_path: Path):
     assert "instal" in exc.value.detail
 
 
+# ------------------------------------- follow-on: undeclared extra (pip exits 0)
+
+def test_detect_undeclared_extras_parses_pip_warning():
+    # The pure detector: pip's real warning (captured from pip 25 against a package
+    # with no extras), older pip's version-less spelling, and a clean install (none).
+    out = (
+        "Obtaining file:///x\n"
+        "WARNING: demo_pkg 0.0.0 does not provide the extra 'alsobad'\n"
+        "WARNING: demo_pkg 0.0.0 does not provide the extra 'bogus'\n"
+        "Successfully installed demo_pkg-0.0.0\n"
+    )
+    assert rr.detect_undeclared_extras(out) == ["alsobad", "bogus"]  # sorted, unique
+    assert rr.detect_undeclared_extras(
+        "WARNING: pkg does not provide the extra 'x'"  # older pip: no version
+    ) == ["x"]
+    assert rr.detect_undeclared_extras("Successfully installed demo_pkg-0.0.0") == []
+
+
+def _install_no_pytest_with_undeclared_extra_warning(lane: Path, extra: str) -> list[str]:
+    """Like `_offline_install_no_pytest` (brings the package, NOT pytest) but also
+    prints pip's real undeclared-extra WARNING on stderr and exits 0 — the exact
+    shape of `pip install -e <lane>[<extra>]` when <extra> is a typo: pip warns,
+    exits 0, and installs none of that extra's dependencies."""
+    vpy = lane / rr._VENV_DIRNAME / "bin" / "python"
+    script = (
+        _SEED_SCRIPT
+        + ";import sys;sys.stderr.write("
+        + repr(f"WARNING: demo_pkg 0.0.0 does not provide the extra '{extra}'\n")
+        + ")"
+    )
+    return [str(vpy), "-c", script, str(lane / "src")]
+
+
+def test_run_refuses_undeclared_extra_naming_it_before_pytest(tmp_path: Path):
+    # Root-cause naming. This is the SAME scenario as the pytest-absent test — the
+    # install brings the package but not pytest — except the install ALSO emits pip's
+    # undeclared-extra warning (a typo'd `[devv]`). The undeclared-extra check fires
+    # first, so the run refuses `undeclared_extra` naming `devv` instead of the
+    # misleading `pytest_not_installed` the reviewer would otherwise chase. Removing
+    # the (4a) block flips this to `pytest_not_installed` (mutation witness).
+    repo, head_tree = _pkg_repo(tmp_path, test_body=PASS_TEST)
+    _write_marker(repo, _git(repo, "rev-parse", "HEAD"), head_tree)
+    with pytest.raises(rr.ReviewRunRefused) as exc:
+        rr.run_review_lane(
+            repo, package="demo_pkg", pytest_args=["-q"],
+            install=_install_no_pytest_with_undeclared_extra_warning(repo, "devv"),
+        )
+    assert exc.value.code == "undeclared_extra", exc.value.code
+    assert "devv" in exc.value.detail
+
+
 def test_spaced_lane_path_survives(tmp_path: Path):
     # P2: split the template FIRST, then substitute per token, so a lane path with a
     # space survives even with an unquoted {venv}/{lane} in the hint line. The prior
