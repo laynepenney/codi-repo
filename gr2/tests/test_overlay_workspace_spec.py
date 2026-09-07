@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from gr2_overlay.workspace_spec import (
+from gr2.overlay.workspace_spec import (
     OverlaySpecEntry,
     load_overlay_spec,
     overlay_spec_path,

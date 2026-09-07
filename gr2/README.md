@@ -23,9 +23,9 @@ Create your first overlay in under 3 minutes.
 
 ```python
 from pathlib import Path
-from gr2_overlay.objects import capture_overlay_object
-from gr2_overlay.activate import activate_overlay, deactivate_overlay
-from gr2_overlay.types import OverlayMeta, OverlayRef, OverlayTier, TrustLevel
+from gr2.overlay.objects import capture_overlay_object
+from gr2.overlay.activate import activate_overlay, deactivate_overlay
+from gr2.overlay.types import OverlayMeta, OverlayRef, OverlayTier, TrustLevel
 
 # Initialize a bare git repo as the overlay store
 import subprocess
@@ -84,7 +84,7 @@ assert not (workspace / "settings.toml").exists()
 Overlays use identity-mapped refspecs for transport between stores:
 
 ```python
-from gr2_overlay.refs import push_overlay_ref, fetch_overlay_ref
+from gr2.overlay.refs import push_overlay_ref, fetch_overlay_ref
 
 # Machine A: push to a shared remote
 push_overlay_ref(local_store, remote_store, overlay_ref)
@@ -169,7 +169,7 @@ supports both human-readable and machine-readable (`--json`) output:
 
 ## Performance gates
 
-The perf harness (`gr2_overlay/perf.py`) measures overlay operations
+The perf harness (`gr2/overlay/perf.py`) measures overlay operations
 against git baselines:
 
 | Gate | Measures | Threshold |
@@ -253,6 +253,6 @@ All criteria are validated by the acceptance harness at
 ```bash
 pip install -e ".[dev]"
 pytest
-ruff check gr2_overlay/ tests/
-ruff format --check gr2_overlay/ tests/
+ruff check gr2/overlay/ tests/
+ruff format --check gr2/overlay/ tests/
 ```

@@ -11,7 +11,7 @@ from typing import Any
 import tomli_w
 import yaml
 
-from gr2_overlay.types import OverlayRef
+from gr2.overlay.types import OverlayRef
 
 CURATED_DRIVERS: dict[str, str] = {
     "overlay-deep": "deep",

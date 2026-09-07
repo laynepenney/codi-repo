@@ -13,16 +13,16 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
-from gr2_overlay.activate import (
+from gr2.overlay.activate import (
     ActivationResult,
     _load_managed_files,
     activate_overlay,
     deactivate_overlay,
     read_active_overlay_stack,
 )
-from gr2_overlay.objects import capture_overlay_object
-from gr2_overlay.trust import write_workspace_allowlist
-from gr2_overlay.types import OverlayMeta, OverlayRef, OverlayTier, TrustLevel
+from gr2.overlay.objects import capture_overlay_object
+from gr2.overlay.trust import write_workspace_allowlist
+from gr2.overlay.types import OverlayMeta, OverlayRef, OverlayTier, TrustLevel
 
 
 def _init_bare_git_repo(path: Path) -> Path:

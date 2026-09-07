@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from gr2_overlay.perf import (
+from gr2.overlay.perf import (
     PerfGateFailure,
     PerfGateResult,
     assert_perf_gates,

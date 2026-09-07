@@ -53,22 +53,47 @@ def test_gr2_prototypes_repo_maintenance_imports(tmp_path: Path) -> None:
     assert result.returncode == 0, result.stderr
 
 
-def test_gr2_overlay_still_imports_unprefixed(tmp_path: Path) -> None:
-    """gr2_overlay stays its own top-level package -- the packaging fix must not break it."""
-    result = _run([sys.executable, "-c", "import gr2_overlay"], cwd=tmp_path)
+def test_gr2_overlay_is_the_real_package(tmp_path: Path) -> None:
+    """gr2.overlay is the real overlay package (renamed from the former
+    top-level gr2_overlay); the packaging fix must not break it."""
+    result = _run([sys.executable, "-c", "import gr2.overlay"], cwd=tmp_path)
     assert result.returncode == 0, result.stderr
 
 
-def test_gr2_overlay_alias_resolves(tmp_path: Path) -> None:
-    """gr2.overlay must resolve to the same physical
-    file as gr2_overlay -- it's a compat alias, not a fork."""
+def test_gr2_overlay_compat_shim_aliases_with_identity(tmp_path: Path) -> None:
+    """The deprecated top-level gr2_overlay shim must alias submodules THROUGH
+    sys.modules, so a consumer's `gr2_overlay.units` IS `gr2.overlay.units` (the
+    same module object), not a parallel copy. A downstream consumer still imports
+    the old name until its follow-on migration; identity is what makes the shim safe."""
     result = _run(
         [
             sys.executable,
             "-c",
-            "import gr2.overlay, gr2_overlay; "
-            "assert gr2.overlay.__file__ == gr2_overlay.__file__, "
-            "(gr2.overlay.__file__, gr2_overlay.__file__)",
+            "import gr2_overlay.units, gr2.overlay.units; "
+            "assert gr2_overlay.units is gr2.overlay.units, "
+            "(gr2_overlay.units, gr2.overlay.units)",
+        ],
+        cwd=tmp_path,
+    )
+    assert result.returncode == 0, result.stderr
+
+
+def test_gr2_overlay_shim_warns_deprecation(tmp_path: Path) -> None:
+    """Importing the shim emits exactly one DeprecationWarning naming gr2 and the
+    removal version, so a consumer sees the migration path without a hard break."""
+    result = _run(
+        [
+            sys.executable,
+            "-W",
+            "error::DeprecationWarning",
+            "-c",
+            "import warnings\n"
+            "with warnings.catch_warnings(record=True) as w:\n"
+            "    warnings.simplefilter('always')\n"
+            "    import gr2_overlay\n"
+            "msgs = [str(x.message) for x in w if issubclass(x.category, DeprecationWarning)]\n"
+            "assert any('gr2.overlay' in m for m in msgs), msgs\n"
+            "assert len([m for m in msgs if 'gr2_overlay' in m]) >= 1, msgs",
         ],
         cwd=tmp_path,
     )

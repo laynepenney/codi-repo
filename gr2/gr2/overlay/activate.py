@@ -7,14 +7,14 @@ import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from gr2_overlay.objects import apply_overlay_object
-from gr2_overlay.trust import (
+from gr2.overlay.objects import apply_overlay_object
+from gr2.overlay.trust import (
     OverlayTrustError,
     authorize_overlay_driver,
     load_workspace_allowlist,
     trust_config_path,
 )
-from gr2_overlay.types import OverlayRef
+from gr2.overlay.types import OverlayRef
 
 GRIP_DIR = ".grip"
 STACK_FILE = "overlay-stack.json"

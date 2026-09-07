@@ -9,7 +9,7 @@ import pytest
 def test_python_driver_unions_imports_and_overlay_wins_conflicting_function_body(
     tmp_path: Path,
 ) -> None:
-    from gr2_overlay.language_drivers import merge_python_overlay
+    from gr2.overlay.language_drivers import merge_python_overlay
 
     ancestor = tmp_path / "ancestor.py"
     current = tmp_path / "current.py"
@@ -47,7 +47,7 @@ def test_python_driver_unions_imports_and_overlay_wins_conflicting_function_body
 def test_python_driver_raises_explicit_composition_conflict_for_non_mergeable_symbol_edit(
     tmp_path: Path,
 ) -> None:
-    from gr2_overlay.language_drivers import (
+    from gr2.overlay.language_drivers import (
         PythonCompositionConflict,
         merge_python_overlay,
     )
@@ -75,7 +75,7 @@ def test_python_driver_raises_explicit_composition_conflict_for_non_mergeable_sy
 
 
 def test_python_driver_refuses_non_python_paths(tmp_path: Path) -> None:
-    from gr2_overlay.language_drivers import merge_python_overlay
+    from gr2.overlay.language_drivers import merge_python_overlay
 
     ancestor = tmp_path / "ancestor.txt"
     current = tmp_path / "current.txt"

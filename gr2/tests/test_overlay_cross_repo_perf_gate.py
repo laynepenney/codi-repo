@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from gr2_overlay.perf import evaluate_cross_repo_perf_gate
+from gr2.overlay.perf import evaluate_cross_repo_perf_gate
 
 
 def test_cross_repo_perf_gate_passes_when_apply_stays_within_git_baseline_budget() -> None:

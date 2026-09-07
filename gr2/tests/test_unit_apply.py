@@ -9,8 +9,8 @@ def test_apply_unit_delegates_manifest_targets_to_atomic_overlay_activation(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    import gr2_overlay.units as units
-    from gr2_overlay.cross_repo import CrossRepoActivationResult
+    import gr2.overlay.units as units
+    from gr2.overlay.cross_repo import CrossRepoActivationResult
 
     workspace_root = tmp_path / "workspace"
     _write_named_manifest(
@@ -83,8 +83,8 @@ def test_apply_unit_surfaces_atomic_failure_details_without_rewriting_them(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    import gr2_overlay.units as units
-    from gr2_overlay.cross_repo import CrossRepoActivationError
+    import gr2.overlay.units as units
+    from gr2.overlay.cross_repo import CrossRepoActivationError
 
     workspace_root = tmp_path / "workspace"
     _write_manifest(
@@ -123,7 +123,7 @@ overlay_source_value = "team/feature-auth"
 
 
 def test_apply_unit_rejects_missing_manifest(tmp_path: Path) -> None:
-    from gr2_overlay.units import apply_unit
+    from gr2.overlay.units import apply_unit
 
     workspace_root = tmp_path / "workspace"
     workspace_root.mkdir()

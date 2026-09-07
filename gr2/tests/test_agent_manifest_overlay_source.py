@@ -5,7 +5,7 @@ from textwrap import dedent
 
 import pytest
 
-from gr2_overlay.agent_manifest import (
+from gr2.overlay.agent_manifest import (
     AgentManifest,
     AgentManifestValidationError,
     read_effective_agent_manifest,

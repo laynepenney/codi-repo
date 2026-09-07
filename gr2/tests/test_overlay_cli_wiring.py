@@ -16,7 +16,7 @@ from pathlib import Path
 import tomli_w
 from tests.conftest import make_cli_runner
 
-from gr2_overlay.cli import overlay_app
+from gr2.overlay.cli import overlay_app
 
 runner = make_cli_runner()
 

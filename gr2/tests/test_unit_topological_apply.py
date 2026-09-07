@@ -9,7 +9,7 @@ def test_apply_unit_applies_dependency_chain_in_topological_order(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    import gr2_overlay.units as units
+    import gr2.overlay.units as units
 
     workspace_root = tmp_path / "workspace"
     _write_manifest(workspace_root, "base-theme", depends_on=[])
@@ -32,7 +32,7 @@ def test_apply_unit_applies_dependency_chain_in_topological_order(
 
 
 def test_apply_unit_rejects_cycle_in_depends_on_chain(tmp_path: Path) -> None:
-    from gr2_overlay.units import apply_unit
+    from gr2.overlay.units import apply_unit
 
     workspace_root = tmp_path / "workspace"
     _write_manifest(workspace_root, "base-theme", depends_on=["landing-page"])
@@ -44,7 +44,7 @@ def test_apply_unit_rejects_cycle_in_depends_on_chain(tmp_path: Path) -> None:
 
 
 def test_apply_unit_rejects_missing_dependency_manifest(tmp_path: Path) -> None:
-    from gr2_overlay.units import apply_unit
+    from gr2.overlay.units import apply_unit
 
     workspace_root = tmp_path / "workspace"
     _write_manifest(workspace_root, "feature-auth", depends_on=["base-theme"])
@@ -57,7 +57,7 @@ def test_apply_unit_stops_downstream_apply_when_dependency_fails(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    import gr2_overlay.units as units
+    import gr2.overlay.units as units
 
     workspace_root = tmp_path / "workspace"
     _write_manifest(workspace_root, "base-theme", depends_on=[])

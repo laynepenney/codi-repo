@@ -4,16 +4,16 @@ from pathlib import Path
 
 import pytest
 
-from gr2_overlay.activate import (
+from gr2.overlay.activate import (
     OverlayActivationError,
     activate_overlay,
     deactivate_overlay,
     read_active_overlay_stack,
 )
-from gr2_overlay.objects import capture_overlay_object
-from gr2_overlay.refs import fetch_overlay_ref, push_overlay_ref
-from gr2_overlay.trust import write_workspace_allowlist
-from gr2_overlay.types import OverlayMeta, OverlayRef, OverlayTier, TrustLevel
+from gr2.overlay.objects import capture_overlay_object
+from gr2.overlay.refs import fetch_overlay_ref, push_overlay_ref
+from gr2.overlay.trust import write_workspace_allowlist
+from gr2.overlay.types import OverlayMeta, OverlayRef, OverlayTier, TrustLevel
 
 
 def test_activate_materializes_overlay_eagerly_into_working_tree(tmp_path: Path) -> None:
