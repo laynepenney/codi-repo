@@ -22,10 +22,51 @@ from __future__ import annotations
 import json
 import os
 import re
+import shlex
 import subprocess
 import sys
 import tempfile
 from pathlib import Path
+
+# An in-repo hint read when `--install` is omitted. It lives at the REPO ROOT
+# (the lane), NOT in a pyproject table, on purpose: a repo whose importable
+# package is a SUBDIR (grip's is `gr2/`) has no top-level pyproject, which is the
+# exact case the default `pip install -e <lane>` cannot handle — so a pyproject
+# hint would be unreadable precisely where it is needed. A root sentinel file
+# works regardless of where the package lives. Format: `key = value` lines, `#`
+# comments; keys `install` (a command with {venv} and {lane} placeholders,
+# shell-split after substitution) and optional `package` (the import name whose
+# __file__ must resolve under the lane).
+_HINT_NAME = ".review-install"
+
+
+_HINT_KEYS = frozenset({"install", "package"})
+
+
+def read_install_hint(repo_dir: Path) -> dict | None:
+    """Parse `<repo_dir>/.review-install`; return {'install': str, 'package': str}
+    (both optional keys) or None when the file is absent. An unrecognised key is a
+    REFUSAL (`bad_hint`), not a silent skip: a typo like `instal = ...` would
+    otherwise fall through to the default install and refuse under a cause the repo
+    never declared."""
+    p = repo_dir / _HINT_NAME
+    if not p.is_file():
+        return None
+    out: dict[str, str] = {}
+    for raw in p.read_text().splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, val = line.partition("=")
+        key = key.strip()
+        if key not in _HINT_KEYS:
+            raise ReviewRunRefused(
+                "bad_hint",
+                f"unrecognised key {key!r} in {p}; allowed keys are "
+                f"{sorted(_HINT_KEYS)}",
+            )
+        out[key] = val.strip()
+    return out
 
 _MARKER_NAME = ".grip-open-gr-reconstruct.json"
 _RECEIPT_NAME = ".grip-review-run.json"
@@ -262,7 +303,7 @@ def _read_marker(lane_dir: Path) -> dict:
 def run_review_lane(
     lane_dir: Path,
     *,
-    package: str,
+    package: str | None = None,
     pytest_args: list[str],
     python: str | None = None,
     install: list[str] | None = None,
@@ -305,21 +346,77 @@ def run_review_lane(
         raise ReviewRunRefused("venv_failed", f"venv create failed: {proc.stderr.strip()}")
     venv_python = venv_dir / "bin" / "python"
 
-    # (3) install the reconstructed tree editable.
-    install_cmd = install or [str(venv_python), "-m", "pip", "install", "-e", str(repo_dir)]
-    proc = subprocess.run(install_cmd, text=True, capture_output=True, cwd=str(repo_dir))
+    # (3) resolve install + package, tracking WHERE each came from. An explicit
+    #     --install/--package always wins; otherwise the repo's own .review-install
+    #     hint supplies them, so a repo that declares itself (like grip, whose package
+    #     is the gr2/ subdir) needs no hand-written flags. The hint's install template
+    #     is SHELL-SPLIT FIRST, then {venv}/{lane} substituted per token, so a lane
+    #     path containing a space stays one token even with an unquoted hint line
+    #     (substituting before splitting would let the space break the token apart).
+    install_source = "flag" if install is not None else None
+    package_source = "flag" if package is not None else None
+    hint = read_install_hint(repo_dir)
+    if install is None and hint and hint.get("install"):
+        install = [
+            tok.replace("{venv}", str(venv_python)).replace("{lane}", str(repo_dir))
+            for tok in shlex.split(hint["install"])
+        ]
+        install_source = "hint"
+    if package is None and hint and hint.get("package"):
+        package = hint["package"]
+        package_source = "hint"
+    if package is None:
+        raise ReviewRunRefused(
+            "no_package",
+            "no --package given and the lane's .review-install declares none; a "
+            "package name is required so the install can be proven to resolve under "
+            "the lane",
+        )
+
+    # (4) install the reconstructed tree editable. A hint (or flag) can name a binary
+    #     that does not exist; subprocess.run then raises OSError, which must become a
+    #     refusal, never an uncaught traceback (tree content chooses the command, so a
+    #     typo in a repo's own hint must not produce the one shape review run promises
+    #     never to give).
+    if install is not None:
+        install_cmd = install
+    else:
+        install_cmd = [str(venv_python), "-m", "pip", "install", "-e", str(repo_dir)]
+        install_source = "default"
+    try:
+        proc = subprocess.run(install_cmd, text=True, capture_output=True, cwd=str(repo_dir))
+    except OSError as exc:
+        raise ReviewRunRefused(
+            "install_failed",
+            f"install `{' '.join(install_cmd)}` could not run: {exc}",
+        )
     if proc.returncode != 0:
         raise ReviewRunRefused(
             "install_failed",
             f"install `{' '.join(install_cmd)}` failed: {proc.stderr.strip()[-800:]}",
         )
 
-    # (4) IMPORT UNDER THE LANE — in the same env pytest will use.
+    # (5) IMPORT UNDER THE LANE — in the same env pytest will use.
     run_env = {**os.environ}
     resolved_file = resolve_import_file(venv_python, package, run_env)
     assert_import_under_lane(resolved_file, lane_dir)
 
-    # (5) run pytest; counts from the summary line, never the exit code.
+    # (6) pytest must be importable in the lane venv. A plain editable install does
+    #     not bring it (pytest is a test-time extra), and running pytest anyway
+    #     yields exit 1 with no summary — which the summary check would mislabel
+    #     `unparseable_summary`. Name the real cause instead, and keep it a refusal.
+    proc = subprocess.run(
+        [str(venv_python), "-c", "import pytest"], text=True, capture_output=True, env=run_env
+    )
+    if proc.returncode != 0:
+        raise ReviewRunRefused(
+            "pytest_not_installed",
+            "pytest is not importable in the lane venv; a plain editable install does "
+            "not bring it. Add pytest to --install or the repo's .review-install "
+            f"(it is a test-time dependency). stderr: {proc.stderr.strip()[-300:]}",
+        )
+
+    # (7) run pytest; counts from the summary line, never the exit code.
     test_cmd = [str(venv_python), "-m", "pytest", *pytest_args]
     proc = subprocess.run(
         test_cmd, text=True, capture_output=True, cwd=str(repo_dir), env=run_env
@@ -358,6 +455,9 @@ def run_review_lane(
         "bound_head_tree": bound_tree,
         "interpreter": {"path": str(venv_python), "version": version},
         "resolved_install_path": resolved_file,
+        "install_command": install_cmd,
+        "install_source": install_source,
+        "package_source": package_source,
         "test_command": test_cmd,
         "collected": summary["collected"],
         "deselected": summary["deselected"],
