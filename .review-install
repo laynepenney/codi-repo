@@ -1,0 +1,12 @@
+# gr2 `review run` install hint: read when --install is omitted.
+#
+# grip's importable Python package lives in the gr2/ subdir, and its test runner
+# (pytest) is declared in the gr2 `[dev]` optional-dependency, so a plain
+# `pip install -e <lane>` at the repo root cannot install it. Declaring it here
+# lets a reviewer run `gr2 review run <lane>` on a grip lane with no hand-written
+# --install/--package.
+#
+# {venv} = the lane venv's python; {lane} = the lane (repo root). Substituted,
+# then shell-split.
+install = {venv} -m pip install -e {lane}/gr2[dev]
+package = gr2_overlay

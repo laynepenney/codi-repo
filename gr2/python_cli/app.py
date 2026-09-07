@@ -2250,10 +2250,10 @@ def review_close_gr(
 @review_app.command("run")
 def review_run(
     lane_dir: Path = typer.Argument(..., help="The open-gr reconstruction lane (the --lane-dir from `review open-gr --enter`)"),
-    package: str = typer.Option(..., "--package", help="Importable package name to bind the install to the lane (its __file__ must resolve under the lane)"),
+    package: Optional[str] = typer.Option(None, "--package", help="Importable package name to bind the install to the lane (its __file__ must resolve under the lane). Optional if the lane's .review-install declares `package`."),
     python: Optional[str] = typer.Option(None, "--python", help="Interpreter to build the lane venv from; defaults to the running interpreter. Recorded in the receipt."),
     system_site_packages: bool = typer.Option(False, "--system-site-packages", help="Create the lane venv with --system-site-packages (host tools visible)"),
-    install: Optional[str] = typer.Option(None, "--install", help="Install command (shell-split); defaults to `<venv python> -m pip install -e <lane>`"),
+    install: Optional[str] = typer.Option(None, "--install", help="Install command (shell-split); defaults to the lane's .review-install hint, else `<venv python> -m pip install -e <lane>`"),
     json_output: bool = typer.Option(False, "--json", help="Emit the receipt as JSON"),
     pytest_args: Optional[List[str]] = typer.Argument(None, help="Args passed to pytest after `--` (every -k/-p/path filter is recorded)"),
 ) -> None:
