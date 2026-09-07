@@ -113,6 +113,74 @@ def test_parse_summary_unparseable_is_none():
     assert rr.parse_pytest_summary("Traceback...\nImportError: boom\n") is None
 
 
+def test_parse_failed_ids_from_real_pytest_summary():
+    # review-run door 1: the node ids come from pytest's `-rfE` short test summary.
+    # The fixture is real pytest output shape and includes the two ids a naive parser
+    # gets wrong: an ERROR-at-setup node (status word ERROR, not FAILED) and a
+    # PARAMETRIZED id whose brackets must be kept intact so the reviewer can re-run
+    # exactly that case.
+    out = (
+        "collected 4 items\n\n"
+        "tests/test_math.py .FF                                              [ 75%]\n"
+        "tests/test_db.py E                                                  [100%]\n\n"
+        "==================================== ERRORS ====================================\n"
+        "____________________ ERROR at setup of test_query ____________________\n"
+        "...fixture 'conn' not found...\n"
+        "=========================== short test summary info ============================\n"
+        "FAILED tests/test_math.py::test_add - assert 1 == 2\n"
+        "FAILED tests/test_math.py::test_param[case-2 with spaces] - AssertionError\n"
+        "ERROR tests/test_db.py::test_query - fixture 'conn' not found\n"
+        "======================= 2 failed, 1 error in 0.12s ========================\n"
+    )
+    ids = rr.parse_failed_ids(out)
+    assert ids == [
+        "tests/test_db.py::test_query",
+        "tests/test_math.py::test_add",
+        "tests/test_math.py::test_param[case-2 with spaces]",
+    ], ids
+
+
+def test_parse_failed_ids_keeps_a_parametrized_id_with_spaces_whole():
+    # A parametrized id can contain spaces inside its brackets; `\\S+` would truncate
+    # at the first space. Pin the whole id so the reviewer can re-run exactly it.
+    out = (
+        "=========================== short test summary info ============================\n"
+        "FAILED tests/t.py::test_param[case 2 with spaces] - AssertionError\n"
+    )
+    assert rr.parse_failed_ids(out) == ["tests/t.py::test_param[case 2 with spaces]"]
+
+
+def test_parse_failed_ids_empty_when_all_pass():
+    out = "collected 3 items\n\n===== 3 passed in 0.01s =====\n"
+    assert rr.parse_failed_ids(out) == []
+
+
+def test_merge_report_flags_puts_fE_last_and_drops_N():
+    # Sentinel R1 (v3, measured): pytest's -r is LAST-WINS across tokens AND its chars
+    # are processed IN ORDER, with N (none) CLEARING everything before it. So f/E must
+    # (a) win over any later caller -r and (b) come AFTER any N, or a sorted union like
+    # -rENf drops ERROR (E added, N clears, f added). Fix: drop N (the run requires
+    # output), keep caller chars in order, append f/E LAST.
+    def r(args):
+        out = rr.merge_report_flags(args)
+        assert out[0].startswith("-r"), out
+        assert sum(1 for a in out if a == "-r" or (a.startswith("-r") and len(a) > 2)) == 1, out
+        return out[0][2:], out[1:]
+
+    chars, rest = r(["-q"]); assert chars == "fE" and rest == ["-q"]
+    chars, rest = r(["-rN", "-q"]); assert chars == "fE" and rest == ["-q"]   # N dropped
+    chars, _ = r(["-rs"]); assert chars == "sfE"                              # caller kept, fE last
+    chars, rest = r(["-r", "sx", "-q"]); assert chars == "sxfE" and rest == ["-q"]
+    chars, _ = r(["-rNEf"]); assert chars == "fE"                             # N gone, E/f re-appended last
+    chars, _ = r(["-rA"]); assert chars == "AfE"                             # A (all) stays ahead of f/E
+    chars, _ = r([]); assert chars == "fE"
+    chars, _ = r(["-rN", "-q", "-rsx"]); assert chars == "sxfE"              # collapse, N gone, fE last
+    # invariant across shapes: no N survives, and the spec ENDS with f then E
+    for a in (["-rN"], ["-rxN"], ["-rA"], ["-q"], ["-r", "Ns"]):
+        c = rr.merge_report_flags(a)[0][2:]
+        assert "N" not in c and c.endswith("fE"), (a, c)
+
+
 # ---------------------------------------------------- THE tree comparison + drift
 
 def test_tree_bound_passes_on_a_pristine_reconstruction(tmp_path: Path):
@@ -224,6 +292,66 @@ def test_run_green_records_a_bound_receipt(tmp_path: Path):
     assert (repo / rr._RECEIPT_NAME).exists()
 
 
+def test_run_red_receipt_names_the_failed_ids_and_keeps_the_output(tmp_path: Path):
+    # review-run door 1: a red run's receipt records only COUNTS (`failed: 35`) with
+    # no way back to WHICH tests failed, and the raw pytest output is never persisted
+    # at all -- so a reviewer reading the receipt (or the coordinator reading a pasted
+    # one) cannot see the failures. Real fixture: my own real review, 35 env failures
+    # with no ids. The receipt must carry the failed node ids AND the run must write
+    # the full pytest output to a log file in the lane.
+    body = (
+        "from demo_pkg import VALUE\n\n"
+        "def test_ok():\n    assert VALUE == 1\n\n"
+        "def test_bad():\n    assert VALUE == 2\n\n"
+        "def test_also_bad():\n    raise RuntimeError('boom')\n"
+    )
+    repo, head_tree = _pkg_repo(tmp_path, test_body=body)
+    _write_marker(repo, _git(repo, "rev-parse", "HEAD"), head_tree)
+    receipt = rr.run_review_lane(
+        repo, package="demo_pkg", pytest_args=["-q"], install=_offline_install(repo),
+    )
+    assert receipt["result"] == "red"
+    assert receipt["failed"] >= 1
+    # the node ids of the failures are recoverable from the receipt, not just a count.
+    ids = receipt["failed_ids"]
+    assert any(nid.endswith("::test_bad") for nid in ids), ids
+    assert any(nid.endswith("::test_also_bad") for nid in ids), ids
+    assert not any(nid.endswith("::test_ok") for nid in ids), ids
+    # every id names a real node (path::test), so a reader can re-run exactly it.
+    assert all("::" in nid for nid in ids), ids
+    # and the full pytest output is persisted in the lane (survives to close, below).
+    log = repo / rr._OUTPUT_LOG_NAME
+    assert log.is_file(), "review run must write the pytest output to a log file"
+    assert "test_bad" in log.read_text()
+    assert receipt["output_log"] == rr._OUTPUT_LOG_NAME
+
+
+def test_run_red_ids_survive_a_caller_rN_with_a_setup_error(tmp_path: Path):
+    # Sentinel R1 (v3, measured): a caller -rN must not suppress EITHER FAILED or ERROR
+    # ids. The v2 witness had only a plain failure, so a sorted union `-rENf` (where N
+    # clears the E that precedes it) still PASSED it while silently dropping ERROR ids.
+    # This fixture has BOTH a plain assertion failure AND an ERROR-at-setup (a fixture
+    # that raises), so the ERROR path is exercised: both ids must come back.
+    body = (
+        "import pytest\n"
+        "from demo_pkg import VALUE\n\n"
+        "@pytest.fixture\n"
+        "def boom():\n    raise RuntimeError('setup fail')\n\n"
+        "def test_ok():\n    assert VALUE == 1\n\n"
+        "def test_bad():\n    assert VALUE == 2\n\n"
+        "def test_errored(boom):\n    assert True\n"
+    )
+    repo, head_tree = _pkg_repo(tmp_path, test_body=body)
+    _write_marker(repo, _git(repo, "rev-parse", "HEAD"), head_tree)
+    receipt = rr.run_review_lane(
+        repo, package="demo_pkg", pytest_args=["-q", "-rN"], install=_offline_install(repo),
+    )
+    assert receipt["result"] == "red"
+    ids = receipt["failed_ids"]
+    assert any(nid.endswith("::test_bad") for nid in ids), ids       # FAILED survives
+    assert any(nid.endswith("::test_errored") for nid in ids), ids   # ERROR survives (the v2 gap)
+
+
 def test_run_refuses_when_a_k_filter_selects_zero_tests(tmp_path: Path):
     # Stromus addition 2: zero selected is a refusal, not a green — from the summary
     # line, not the exit code (pytest exits 0 having run nothing).
@@ -319,6 +447,28 @@ def _hint_install_string() -> str:
     placeholders review run substitutes; includes host sys.path so pytest resolves."""
     paths = ["{lane}/src", *[p for p in sys.path if p]]
     return shlex.join(["{venv}", "-c", _SEED_SCRIPT, *paths])
+
+
+def test_run_install_flag_substitutes_venv_and_lane(tmp_path: Path):
+    # review-run door 2: the --install FLAG must substitute {venv}/{lane} exactly as
+    # the .review-install hint does. Before the fix only the hint substituted, so a
+    # reviewer who passed the documented `{venv} ... {lane}` template on the flag got
+    # LITERAL braces -> the install binary "{venv}" does not exist -> install_failed.
+    repo, head_tree = _pkg_repo(tmp_path, test_body=PASS_TEST)
+    _write_marker(repo, _git(repo, "rev-parse", "HEAD"), head_tree)
+    # the flag carries the SAME placeholder template the hint accepts
+    install = shlex.split(_hint_install_string())
+    assert "{venv}" in install and any("{lane}" in t for t in install), install
+    receipt = rr.run_review_lane(
+        repo, package="demo_pkg", pytest_args=["-q"], install=install,
+    )
+    assert receipt["result"] == "green", receipt
+    # no literal placeholder survives, and {venv} resolved to the lane venv python
+    assert not any("{venv}" in t or "{lane}" in t for t in receipt["install_command"]), receipt["install_command"]
+    assert receipt["install_command"][0] == receipt["interpreter"]["path"]
+    # {lane} resolved to the lane path
+    assert str(repo.resolve() / "src") in receipt["install_command"], receipt["install_command"]
+    assert receipt["install_source"] == "flag"
 
 
 def test_run_refuses_pytest_absent_with_the_named_cause(tmp_path: Path):
