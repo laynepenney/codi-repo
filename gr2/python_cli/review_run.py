@@ -35,8 +35,9 @@ from pathlib import Path
 # hint would be unreadable precisely where it is needed. A root sentinel file
 # works regardless of where the package lives. Format: `key = value` lines, `#`
 # comments; keys `install` (a command with {venv} and {lane} placeholders,
-# shell-split after substitution) and optional `package` (the import name whose
-# __file__ must resolve under the lane).
+# shell-split FIRST, then {venv}/{lane} substituted per token — so a lane path with
+# a space stays one token) and optional `package` (the import name whose __file__
+# must resolve under the lane).
 _HINT_NAME = ".review-install"
 
 
@@ -210,6 +211,26 @@ def assert_import_under_lane(resolved_file: str, lane_dir: Path) -> None:
             f"{p} does not resolve under the lane {root}; a checkout outside the "
             "lane is shadowing the reconstruction (stale editable install)",
         )
+
+
+# ---- undeclared-extra detection (pip exits 0 but warns) ----
+
+# pip exits 0 when an install requests an extra the package does not declare,
+# emitting `WARNING: <name> <version> does not provide the extra 'X'` on stderr
+# (older pip omits the version). The invariant is the phrase, so anchor on it and
+# ignore the version. Match either quote style pip might use.
+_UNDECLARED_EXTRA_RE = re.compile(r"""does not provide the extra ['"]([^'"]+)['"]""")
+
+
+def detect_undeclared_extras(output: str) -> list[str]:
+    """Return the sorted unique extra names pip reported as undeclared in `output`.
+
+    A typo'd or undeclared extra in a repo's own `.review-install` (say `gr2[devv]`
+    for `gr2[dev]`) makes pip install NOTHING of what that extra promised — pytest
+    and the rest of the test deps — while exiting 0. The run then fails later under
+    `pytest_not_installed`, which points at the symptom, not the bad extra name. This
+    lets the run name the root cause first."""
+    return sorted({m.group(1) for m in _UNDECLARED_EXTRA_RE.finditer(output)})
 
 
 # ---- pytest summary parsing (counts from the summary line, not exit code) ----
@@ -394,6 +415,21 @@ def run_review_lane(
         raise ReviewRunRefused(
             "install_failed",
             f"install `{' '.join(install_cmd)}` failed: {proc.stderr.strip()[-800:]}",
+        )
+
+    # (4a) An undeclared extra does NOT fail the install — pip warns and exits 0,
+    #      installing none of that extra's dependencies. Named here, BEFORE the import
+    #      and pytest checks, so a typo'd extra surfaces as its own root cause instead
+    #      of the misleading `pytest_not_installed` symptom it would otherwise produce.
+    undeclared = detect_undeclared_extras(proc.stdout + "\n" + proc.stderr)
+    if undeclared:
+        raise ReviewRunRefused(
+            "undeclared_extra",
+            "the install requested extra(s) the package does not declare: "
+            f"{', '.join(undeclared)}. pip exits 0 on an undeclared extra and installs "
+            "nothing for it, so the test dependencies it was meant to bring (pytest and "
+            "the rest) are silently absent. Fix the extra name in --install or the "
+            f"repo's .review-install. install: `{' '.join(install_cmd)}`",
         )
 
     # (5) IMPORT UNDER THE LANE — in the same env pytest will use.
