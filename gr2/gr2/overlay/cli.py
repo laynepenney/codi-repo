@@ -1,6 +1,6 @@
 """CLI plumbing for `gr overlay` subcommands.
 
-Wires typer commands to gr2_overlay module functions.
+Wires typer commands to gr2.overlay module functions.
 """
 
 from __future__ import annotations
@@ -10,9 +10,9 @@ from pathlib import Path
 
 import typer
 
-from gr2_overlay import introspection, workspace_spec
-from gr2_overlay.activate import activate_overlay, deactivate_overlay
-from gr2_overlay.types import OverlayRef
+from gr2.overlay import introspection, workspace_spec
+from gr2.overlay.activate import activate_overlay, deactivate_overlay
+from gr2.overlay.types import OverlayRef
 
 overlay_app = typer.Typer(
     help="Config overlay capture, composition, and materialization (Tier A).",

@@ -5,7 +5,7 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
-from gr2_overlay.types import OverlayRef
+from gr2.overlay.types import OverlayRef
 
 
 def push_overlay_ref(

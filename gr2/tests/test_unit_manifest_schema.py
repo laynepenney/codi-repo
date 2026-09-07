@@ -4,11 +4,11 @@ from pathlib import Path
 
 import pytest
 
-from gr2_overlay.types import OverlayRef
+from gr2.overlay.types import OverlayRef
 
 
 def test_unit_manifest_path_lives_under_grip_units_directory(tmp_path: Path) -> None:
-    from gr2_overlay.units import unit_manifest_path
+    from gr2.overlay.units import unit_manifest_path
 
     workspace_root = tmp_path / "workspace"
     workspace_root.mkdir()
@@ -19,7 +19,7 @@ def test_unit_manifest_path_lives_under_grip_units_directory(tmp_path: Path) -> 
 
 
 def test_load_parses_unit_manifest_with_all_required_fields(tmp_path: Path) -> None:
-    from gr2_overlay.units import UnitManifest, UnitOverlaySource, load_unit_manifest
+    from gr2.overlay.units import UnitManifest, UnitOverlaySource, load_unit_manifest
 
     workspace_root = tmp_path / "workspace"
     manifest_path = workspace_root / ".grip" / "units" / "feature-auth.toml"
@@ -75,7 +75,7 @@ overlay_source_value = "team/feature-auth"
 
 
 def test_depends_on_defaults_to_empty_list_when_omitted(tmp_path: Path) -> None:
-    from gr2_overlay.units import load_unit_manifest
+    from gr2.overlay.units import load_unit_manifest
 
     workspace_root = tmp_path / "workspace"
     manifest_path = workspace_root / ".grip" / "units" / "feature-auth.toml"
@@ -100,7 +100,7 @@ overlay_source_value = "team/feature-auth"
 
 
 def test_validate_rejects_non_v1_manifest() -> None:
-    from gr2_overlay.units import UnitManifest, UnitOverlaySource, validate_unit_manifest
+    from gr2.overlay.units import UnitManifest, UnitOverlaySource, validate_unit_manifest
 
     manifest = UnitManifest(
         version=2,
@@ -124,7 +124,7 @@ def test_validate_rejects_non_v1_manifest() -> None:
 
 
 def test_validate_rejects_invalid_scope() -> None:
-    from gr2_overlay.units import UnitManifest, UnitOverlaySource, validate_unit_manifest
+    from gr2.overlay.units import UnitManifest, UnitOverlaySource, validate_unit_manifest
 
     manifest = UnitManifest(
         version=1,
@@ -148,7 +148,7 @@ def test_validate_rejects_invalid_scope() -> None:
 
 
 def test_validate_rejects_empty_source_overlays() -> None:
-    from gr2_overlay.units import UnitManifest, validate_unit_manifest
+    from gr2.overlay.units import UnitManifest, validate_unit_manifest
 
     manifest = UnitManifest(
         version=1,
@@ -164,7 +164,7 @@ def test_validate_rejects_empty_source_overlays() -> None:
 
 
 def test_validate_rejects_duplicate_repo_names_in_source_overlays() -> None:
-    from gr2_overlay.units import UnitManifest, UnitOverlaySource, validate_unit_manifest
+    from gr2.overlay.units import UnitManifest, UnitOverlaySource, validate_unit_manifest
 
     manifest = UnitManifest(
         version=1,
@@ -195,7 +195,7 @@ def test_validate_rejects_duplicate_repo_names_in_source_overlays() -> None:
 
 
 def test_validate_rejects_empty_target_base_ref() -> None:
-    from gr2_overlay.units import UnitManifest, UnitOverlaySource, validate_unit_manifest
+    from gr2.overlay.units import UnitManifest, UnitOverlaySource, validate_unit_manifest
 
     manifest = UnitManifest(
         version=1,
@@ -219,7 +219,7 @@ def test_validate_rejects_empty_target_base_ref() -> None:
 
 
 def test_validate_rejects_invalid_on_failure_policy() -> None:
-    from gr2_overlay.units import UnitManifest, UnitOverlaySource, validate_unit_manifest
+    from gr2.overlay.units import UnitManifest, UnitOverlaySource, validate_unit_manifest
 
     manifest = UnitManifest(
         version=1,
@@ -243,7 +243,7 @@ def test_validate_rejects_invalid_on_failure_policy() -> None:
 
 
 def test_validate_accepts_repo_scope_and_named_dependencies() -> None:
-    from gr2_overlay.units import UnitManifest, UnitOverlaySource, validate_unit_manifest
+    from gr2.overlay.units import UnitManifest, UnitOverlaySource, validate_unit_manifest
 
     manifest = UnitManifest(
         version=1,

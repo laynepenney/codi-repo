@@ -7,7 +7,7 @@ import pytest
 
 
 def test_propose_unit_manifest_writes_schema_from_current_overlay_state(tmp_path: Path) -> None:
-    from gr2_overlay.units import RepoUnitSource, propose_unit_manifest
+    from gr2.overlay.units import RepoUnitSource, propose_unit_manifest
 
     workspace_root = tmp_path / "workspace"
     app_root = workspace_root / "repos" / "app"
@@ -55,7 +55,7 @@ def test_propose_unit_manifest_writes_schema_from_current_overlay_state(tmp_path
 
 
 def test_propose_unit_manifest_rejects_repo_without_active_overlay(tmp_path: Path) -> None:
-    from gr2_overlay.units import RepoUnitSource, propose_unit_manifest
+    from gr2.overlay.units import RepoUnitSource, propose_unit_manifest
 
     workspace_root = tmp_path / "workspace"
     app_root = workspace_root / "repos" / "app"
@@ -84,7 +84,7 @@ def test_propose_unit_manifest_rejects_repo_without_active_overlay(tmp_path: Pat
 def test_propose_unit_manifest_rejects_multiple_active_overlays_for_single_repo(
     tmp_path: Path,
 ) -> None:
-    from gr2_overlay.units import RepoUnitSource, propose_unit_manifest
+    from gr2.overlay.units import RepoUnitSource, propose_unit_manifest
 
     workspace_root = tmp_path / "workspace"
     app_root = workspace_root / "repos" / "app"
@@ -117,7 +117,7 @@ def test_propose_unit_manifest_rejects_multiple_active_overlays_for_single_repo(
 
 
 def test_propose_unit_manifest_rejects_conflicting_existing_manifest(tmp_path: Path) -> None:
-    from gr2_overlay.units import RepoUnitSource, propose_unit_manifest
+    from gr2.overlay.units import RepoUnitSource, propose_unit_manifest
 
     workspace_root = tmp_path / "workspace"
     app_root = workspace_root / "repos" / "app"
@@ -156,7 +156,7 @@ def test_propose_unit_manifest_rejects_conflicting_existing_manifest(tmp_path: P
 
 
 def test_propose_unit_manifest_is_idempotent_for_identical_content(tmp_path: Path) -> None:
-    from gr2_overlay.units import RepoUnitSource, propose_unit_manifest
+    from gr2.overlay.units import RepoUnitSource, propose_unit_manifest
 
     workspace_root = tmp_path / "workspace"
     app_root = workspace_root / "repos" / "app"

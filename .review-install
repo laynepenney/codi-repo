@@ -10,4 +10,4 @@
 # shell-split first, then {venv}/{lane} substituted per token (so a lane path with
 # a space stays one token).
 install = {venv} -m pip install -e {lane}/gr2[dev]
-package = gr2_overlay
+package = gr2

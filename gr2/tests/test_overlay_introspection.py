@@ -2,16 +2,16 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from gr2_overlay.introspection import (
+from gr2.overlay.introspection import (
     overlay_impact,
     overlay_stack,
     overlay_status,
     overlay_trace,
     overlay_why,
 )
-from gr2_overlay.objects import capture_overlay_object
-from gr2_overlay.refs import push_overlay_ref
-from gr2_overlay.types import OverlayMeta, OverlayRef, OverlayTier, TrustLevel
+from gr2.overlay.objects import capture_overlay_object
+from gr2.overlay.refs import push_overlay_ref
+from gr2.overlay.types import OverlayMeta, OverlayRef, OverlayTier, TrustLevel
 
 
 def test_overlay_stack_reports_active_stack_with_metadata_in_human_and_json(tmp_path: Path) -> None:

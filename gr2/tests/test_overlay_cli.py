@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typer.testing import CliRunner
 
-from gr2_overlay.cli import overlay_app
+from gr2.overlay.cli import overlay_app
 
 runner = CliRunner()
 

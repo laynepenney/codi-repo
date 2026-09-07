@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from gr2_overlay.perf import evaluate_tier_b_perf_gate
+from gr2.overlay.perf import evaluate_tier_b_perf_gate
 
 
 def test_tier_b_perf_gate_enforces_capture_and_apply_ratio_against_git_baselines() -> None:

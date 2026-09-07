@@ -7,12 +7,12 @@ import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from gr2_overlay.cross_repo import (
+from gr2.overlay.cross_repo import (
     RepoOverlayTarget,
     _restore_snapshot,
     activate_overlays_atomically,
 )
-from gr2_overlay.types import OverlayRef
+from gr2.overlay.types import OverlayRef
 
 _REFS_OVERLAYS_PREFIX = "refs/overlays/"
 _VALID_SCOPES = {"workspace", "repo"}

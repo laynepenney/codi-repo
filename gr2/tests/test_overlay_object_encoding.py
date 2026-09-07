@@ -3,8 +3,8 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
-from gr2_overlay.objects import apply_overlay_object, capture_overlay_object
-from gr2_overlay.types import OverlayMeta, OverlayRef, OverlayTier, TrustLevel
+from gr2.overlay.objects import apply_overlay_object, capture_overlay_object
+from gr2.overlay.types import OverlayMeta, OverlayRef, OverlayTier, TrustLevel
 
 
 def test_capture_writes_annotated_tag_pointing_at_structured_tree(tmp_path: Path) -> None:
