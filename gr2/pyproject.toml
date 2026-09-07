@@ -1,13 +1,19 @@
 [build-system]
 requires = ["setuptools>=68.0"]
-build-backend = "setuptools.build_meta"
+# In-tree backend (gr2/_build/backend.py): single-sources the version from the
+# repo-root Cargo.toml at build time so a published wheel says which grip it
+# belongs to, instead of a hand-maintained number drifting from the Rust crate.
+build-backend = "backend"
+backend-path = ["_build"]
 
 [project]
 # One product name across both indexes: `cargo install gitgrip` gives `gr`,
 # `pip install gitgrip` gives `gr2` (the console script below). The import
 # package is `gr2`; `gr2_overlay` survives only as a deprecated compat shim.
 name = "gitgrip"
-version = "0.1.0"
+# Single-sourced from Cargo.toml at build time (see [build-system] backend and
+# [tool.setuptools.dynamic] below); never hand-edited here.
+dynamic = ["version"]
 description = "gr2 overlay substrate: config-overlay capture, composition, and materialization"
 requires-python = ">=3.11"
 dependencies = [
@@ -29,6 +35,11 @@ dev = [
     "pytest>=8.0",
     "ruff>=0.4",
 ]
+
+[tool.setuptools.dynamic]
+# VERSION is generated at build time by _build/backend.py from ../Cargo.toml; it
+# is gitignored and travels inside the sdist (MANIFEST.in) for wheel-from-sdist.
+version = { file = "VERSION" }
 
 [tool.setuptools]
 # The overlay subsystem is `gr2.overlay` (physically gr2/overlay). `gr2_overlay`
