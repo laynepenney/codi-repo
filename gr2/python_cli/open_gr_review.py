@@ -20,6 +20,7 @@ from pathlib import Path
 from gr2.prototypes import lane_workspace_prototype as lane_proto
 
 from . import grip, project_review, review
+from .clone_exec import IncompleteRemoval, rmtree_or_refuse
 from .gitops import git
 
 
@@ -62,8 +63,6 @@ def close_open_gr_lane(lane_dir: Path) -> dict:
     the disposable tree. Refuses a directory with no open-gr marker (so a wrong
     ``--lane-dir`` can never remove an arbitrary path). No OWNER_UNIT, no lane pop,
     no cwd restore -- open-gr did none of those, so teardown undoes only the clone."""
-    import shutil
-
     lane_dir = Path(lane_dir)
     marker_path = lane_dir / _OPEN_GR_MARKER
     if not marker_path.exists():
@@ -79,7 +78,12 @@ def close_open_gr_lane(lane_dir: Path) -> dict:
             f"(kind={marker.get('kind')!r})"
         )
     gr_commit = marker.get("gr_commit", "")
-    shutil.rmtree(lane_dir, ignore_errors=True)
+    try:
+        rmtree_or_refuse(lane_dir)
+    except IncompleteRemoval as cleanup_exc:
+        raise OpenGrReviewError(
+            f"open-gr lane at {lane_dir} could not be fully reclaimed: {cleanup_exc}"
+        ) from cleanup_exc
     return {"reclaimed": str(lane_dir), "gr_commit": gr_commit}
 
 
@@ -309,8 +313,14 @@ def open_gr_enter(
         )
     finally:
         if scratch_root is not None:
-            import shutil
-            shutil.rmtree(scratch_root, ignore_errors=True)
+            # Log-and-continue, deliberately: this finally spans whatever the try
+            # block just did (opened a review, or raised) and a leftover scratch
+            # clone must never mask either outcome by raising here instead.
+            try:
+                rmtree_or_refuse(scratch_root)
+            except IncompleteRemoval as cleanup_exc:
+                import sys
+                print(f"warning: {cleanup_exc}", file=sys.stderr)
     if outcome.status != "opened" or outcome.review_root is None:
         # Refusal / partial propagates unchanged; no receipt, no enter to unwind.
         return outcome
@@ -620,8 +630,13 @@ def exit_gr_review(
     # cleanup (no prune verb that could ever touch a work lane). The mirror
     # persists; only the disposable review clones are removed.
     if receipt.get("lane_kind") == "review-ephemeral":
-        import shutil
-        shutil.rmtree(review_root, ignore_errors=True)
+        try:
+            rmtree_or_refuse(review_root)
+        except IncompleteRemoval as cleanup_exc:
+            raise OpenGrReviewError(
+                f"review-ephemeral lane at {review_root} could not be fully "
+                f"removed on exit: {cleanup_exc}"
+            ) from cleanup_exc
     return OpenGrExit(
         restored_lane=restored_lane,
         restored_cwd=receipt["prior_cwd"],

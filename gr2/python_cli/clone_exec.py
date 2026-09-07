@@ -81,6 +81,40 @@ class CloneExecutionError(MaterializationPlanError):
     working, while the type still names which layer refused."""
 
 
+class IncompleteRemoval(CloneExecutionError):
+    """A directory a caller asked to be removed is still (partially) present."""
+
+
+def rmtree_or_refuse(path: Path) -> None:
+    """Remove a directory tree, then verify it is actually gone.
+
+    ``shutil.rmtree(path, ignore_errors=True)`` silently drops any failure --
+    a locked file, a permission-denied entry, a busy mount point -- and every
+    call site that used it alone had no way to distinguish "cleaned" from
+    "partially cleaned," several of them going on to report success (a
+    "lane discarded" message, a silent fall-through to reuse the winner's
+    lane) regardless. `shutil.rmtree` only removes a directory's OWN entry as
+    its LAST step, so if anything beneath it survives, the directory itself
+    still exists -- checking `path.exists()` after the attempt is therefore a
+    complete detector for "did the whole tree go," not a sample of it. Raises,
+    naming one surviving entry, if it did not; a caller that wants a softer
+    outcome (log and continue) catches `IncompleteRemoval` explicitly rather
+    than getting silence by default."""
+    shutil.rmtree(path, ignore_errors=True)
+    if not path.exists():
+        return
+    try:
+        remaining = sorted(str(p) for p in path.rglob("*"))
+    except OSError:
+        remaining = []
+    example = remaining[0] if remaining else str(path)
+    raise IncompleteRemoval(
+        f"{path} could not be fully removed; {len(remaining)} entr"
+        f"{'y' if len(remaining) == 1 else 'ies'} beneath it remain, "
+        f"including {example}"
+    )
+
+
 # Section 8.1 names these as the mutable state a clone must OWN. The
 # --git-common-dir check proves only that the .git ROOT is local; every entry
 # beneath it can be redirected individually, which is how a clone with a
@@ -625,8 +659,14 @@ def _stage_and_publish(
         # itself (Sentinel, #803 review at bd7afe5). Nothing follows the rename,
         # so on success there is no staging left for the handler to remove.
         os.replace(staging, dest)
-    except BaseException:
-        shutil.rmtree(staging, ignore_errors=True)
+    except BaseException as exc:
+        try:
+            rmtree_or_refuse(staging)
+        except IncompleteRemoval as cleanup_exc:
+            raise CloneExecutionError(
+                f"clone failed ({exc}) and staging cleanup also left it behind: "
+                f"{cleanup_exc}"
+            ) from exc
         raise
 
 
@@ -716,7 +756,7 @@ def _publish_lane_atomically(
         except FileExistsError:
             # Another creator holds the publish lock. Wait for its dest to appear.
             if dest.exists():
-                shutil.rmtree(staging, ignore_errors=True)
+                rmtree_or_refuse(staging)
                 _reuse_existing_lane(
                     dest,
                     workspace_root=workspace_root,
@@ -740,7 +780,7 @@ def _publish_lane_atomically(
             # absence check below is what refuses it, since the rename itself would
             # happily replace an empty directory.
             if dest.exists():
-                shutil.rmtree(staging, ignore_errors=True)
+                rmtree_or_refuse(staging)
                 _reuse_existing_lane(
                     dest,
                     workspace_root=workspace_root,
@@ -968,6 +1008,12 @@ def materialize_lane_clone(
             expected_branch=branch,
             expected_seed=seed_sha,
         )
-    except BaseException:
-        shutil.rmtree(staging, ignore_errors=True)
+    except BaseException as exc:
+        try:
+            rmtree_or_refuse(staging)
+        except IncompleteRemoval as cleanup_exc:
+            raise CloneExecutionError(
+                f"clone failed ({exc}) and staging cleanup also left it behind: "
+                f"{cleanup_exc}"
+            ) from exc
         raise
