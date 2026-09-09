@@ -1181,7 +1181,18 @@ fn resolve_gripspace_includes(
     let spaces_dir = crate::core::manifest_paths::spaces_dir(workspace_root);
     if spaces_dir.exists() {
         if materialize_gripspaces {
-            let _ = crate::core::gripspace::resolve_all_gripspaces(manifest, &spaces_dir);
+            // Never silently discard the resolver error: a failed include used
+            // to vanish here (`let _ =`), leaving every command with an
+            // overlay-only view and no warning. Warn loudly; the
+            // manifest keeps its gripspaces declaration (resolve_all_gripspaces
+            // no longer takes it), so status still shows the include.
+            if let Err(e) = crate::core::gripspace::resolve_all_gripspaces(manifest, &spaces_dir) {
+                eprintln!("warning: could not resolve gripspace includes: {e}");
+                eprintln!(
+                    "         included repositories may be missing from this command; \
+                     resolve the reported clone and re-run"
+                );
+            }
         } else {
             crate::core::gripspace::resolve_existing_gripspaces(manifest, &spaces_dir)?;
         }
