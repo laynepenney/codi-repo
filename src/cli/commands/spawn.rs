@@ -71,8 +71,13 @@ pub struct ToolConfig {
     pub binary: String,
     #[serde(default)]
     pub cmd: Vec<String>,
-    #[serde(default)]
-    pub default_args: Vec<String>,
+    /// Tool-level launch args, composed BEFORE the agent's own `args` so an
+    /// agent can override. The canonical key is `args`; `default_args` is
+    /// accepted as a backward-compatible alias. The tool-level `args` key was
+    /// silently dropped before this alias existed, so a launch flag set only at
+    /// the tool level never reached the process.
+    #[serde(default, alias = "default_args")]
+    pub args: Vec<String>,
 }
 
 fn default_session() -> String {
@@ -600,6 +605,7 @@ pub fn run_spawn_up(
     agent_filter: Option<String>,
     config_path: Option<String>,
     force_mock: bool,
+    verbose: bool,
     _quiet: bool,
     _json: bool,
 ) -> anyhow::Result<()> {
@@ -748,7 +754,7 @@ pub fn run_spawn_up(
                 .map(|t| t.binary.as_str())
                 .unwrap_or(&agent.tool);
 
-            // Build: binary + cmd + args + default_args
+            // Build: binary + cmd + tool args + agent args
             // cmd: agent cmd overrides tool cmd (if agent has it)
             let cmd_parts: &[String] = if !agent.cmd.is_empty() {
                 &agent.cmd
@@ -756,10 +762,8 @@ pub fn run_spawn_up(
                 tool_config.map(|t| t.cmd.as_slice()).unwrap_or(&[])
             };
 
-            // default_args from tool config (appended last)
-            let default_args: &[String] = tool_config
-                .map(|t| t.default_args.as_slice())
-                .unwrap_or(&[]);
+            // Tool-level args, composed before the agent's own args (agent overrides)
+            let tool_args: &[String] = tool_config.map(|t| t.args.as_slice()).unwrap_or(&[]);
 
             // Resolve relative paths against gripspace root
             // (griptrees don't have .gitgrip/, so paths need to be absolute)
@@ -771,7 +775,7 @@ pub fn run_spawn_up(
                 }
             };
 
-            let resolved_defaults: Vec<String> = default_args.iter().map(|s| resolve(s)).collect();
+            let resolved_defaults: Vec<String> = tool_args.iter().map(|s| resolve(s)).collect();
             let resolved_args: Vec<String> = agent.args.iter().map(|s| resolve(s)).collect();
 
             // Strip --resume when no prior session exists (#579)
@@ -809,16 +813,22 @@ pub fn run_spawn_up(
                 vec![]
             };
 
-            let mut parts: Vec<String> = vec![binary.to_string()];
-            parts.extend(cmd_parts.iter().cloned());
-            parts.extend(resolved_defaults.iter().cloned());
-            parts.extend(model_inject.iter().cloned());
-            parts.extend(resolved_args.iter().cloned());
+            let parts = assemble_launch_parts(
+                binary,
+                cmd_parts,
+                &resolved_defaults,
+                &model_inject,
+                &resolved_args,
+            );
             (
                 finalize_launch_command(parts, &agent.tool, &codex_startup_prompt, &launch_env),
                 Some(expected_process_name(binary)),
             )
         };
+
+        if verbose {
+            Output::info(&format!("  {name} launch command: {launch_cmd}"));
+        }
 
         let launch_script = write_launch_script(
             &workspace_root,
@@ -1000,6 +1010,24 @@ fn codex_synapt_mcp_env_args(launch_env: &HashMap<String, String>) -> Vec<String
         ));
     }
     args
+}
+
+/// Assemble the ordered launch argv: `binary + cmd + tool_args + model_inject
+/// + agent_args`. Tool-level args are composed BEFORE agent-level args so an
+/// agent can override a tool default (last occurrence wins downstream).
+fn assemble_launch_parts(
+    binary: &str,
+    cmd_parts: &[String],
+    tool_args: &[String],
+    model_inject: &[String],
+    agent_args: &[String],
+) -> Vec<String> {
+    let mut parts: Vec<String> = vec![binary.to_string()];
+    parts.extend(cmd_parts.iter().cloned());
+    parts.extend(tool_args.iter().cloned());
+    parts.extend(model_inject.iter().cloned());
+    parts.extend(agent_args.iter().cloned());
+    parts
 }
 
 fn finalize_launch_command(
@@ -2617,5 +2645,74 @@ mod tests {
         assert!(kept.contains(&"--resume".to_string()));
 
         let _ = std::fs::remove_dir_all(&session_dir);
+    }
+
+    // A tool-level `args` key must reach the ToolConfig. Before the fix the
+    // field was named `default_args`, so `[tools.<t>] args = [...]` was an
+    // unknown key and dropped silently: a launch flag set only at the tool
+    // level (e.g. a hook-trust bypass) never reached the spawned process.
+    #[test]
+    fn tool_level_args_key_is_deserialized() {
+        let toml = r#"
+[spawn]
+[tools.mock]
+binary = "mockbin"
+args = ["--tool-flag"]
+[agents.x]
+role = "worker"
+tool = "mock"
+"#;
+        let cfg: SpawnConfig = toml::from_str(toml).unwrap();
+        assert_eq!(
+            cfg.tools["mock"].args,
+            vec!["--tool-flag".to_string()],
+            "tool-level `args` key must populate ToolConfig.args"
+        );
+    }
+
+    // The old key stays valid through the serde alias.
+    #[test]
+    fn tool_level_default_args_alias_still_works() {
+        let toml = r#"
+[spawn]
+[tools.mock]
+binary = "mockbin"
+default_args = ["--legacy-flag"]
+[agents.x]
+role = "worker"
+tool = "mock"
+"#;
+        let cfg: SpawnConfig = toml::from_str(toml).unwrap();
+        assert_eq!(
+            cfg.tools["mock"].args,
+            vec!["--legacy-flag".to_string()],
+            "`default_args` alias must still populate ToolConfig.args"
+        );
+    }
+
+    // Composition order: binary, cmd, TOOL args, model, AGENT args — tool-level
+    // args precede agent-level args so an agent can override a tool default.
+    #[test]
+    fn launch_parts_compose_tool_args_before_agent_args() {
+        let parts = assemble_launch_parts(
+            "mockbin",
+            &["exec".to_string()],
+            &["--tool-flag".to_string()],
+            &[],
+            &["--agent-flag".to_string()],
+        );
+        assert_eq!(
+            parts,
+            vec![
+                "mockbin".to_string(),
+                "exec".to_string(),
+                "--tool-flag".to_string(),
+                "--agent-flag".to_string(),
+            ],
+        );
+        // The tool flag must appear strictly before the agent flag.
+        let ti = parts.iter().position(|a| a == "--tool-flag").unwrap();
+        let ai = parts.iter().position(|a| a == "--agent-flag").unwrap();
+        assert!(ti < ai, "tool-level args must precede agent-level args");
     }
 }
