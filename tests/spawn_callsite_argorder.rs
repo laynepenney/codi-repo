@@ -22,6 +22,15 @@
 //! unique and never "synapt"; teardown kills only that private server, with
 //! the same isolation on the kill command. `env_remove("TMUX")` is the
 //! load-bearing half — inside a pane $TMUX overrides TMUX_TMPDIR.
+//!
+//! Unix-only: the stub tool is a `#!/usr/bin/env bash` script made executable
+//! via `PermissionsExt::from_mode`, and the test drives a real tmux — none of
+//! which exists on Windows. `#![cfg(unix)]` excludes the whole file from the
+//! Windows build; `#[ignore]` alone would still COMPILE it (skipping only
+//! execution), and `std::os::unix` does not exist on Windows, so an ignored
+//! test still red the `windows-latest` `cargo test` build (grip#931-adjacent,
+//! measured on dev CI run 34364897339: E0433 `os::unix`, E0599 `from_mode`).
+#![cfg(unix)]
 
 use assert_cmd::prelude::*;
 use std::fs;
