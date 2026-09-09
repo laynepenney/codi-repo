@@ -610,8 +610,22 @@ fn checkout_rev(path: &Path, rev: &str) -> Result<(), ManifestError> {
             ManifestError::GripspaceError(format!("Failed to inspect rev '{}': {}", rev, e))
         })?;
     if output.status.success() {
+        // Two paths share one truth: are there TRACKED local changes? Untracked
+        // files are always tolerated (an untracked stray in a space clone used
+        // to drop every included repo). Read HEAD and the tracked status once.
+        let target_sha = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        let head = Command::new("git")
+            .args(["rev-parse", "HEAD"])
+            .current_dir(path)
+            .output()
+            .map_err(|e| {
+                ManifestError::GripspaceError(format!("Failed to read gripspace HEAD: {}", e))
+            })?;
+        let at_rev =
+            head.status.success() && String::from_utf8_lossy(&head.stdout).trim() == target_sha;
+
         let status = Command::new("git")
-            .args(["status", "--porcelain"])
+            .args(["status", "--porcelain", "--untracked-files=no"])
             .current_dir(path)
             .output()
             .map_err(|e| {
@@ -623,10 +637,36 @@ fn checkout_rev(path: &Path, rev: &str) -> Result<(), ManifestError> {
                 String::from_utf8_lossy(&status.stderr).trim()
             )));
         }
-        if !String::from_utf8_lossy(&status.stdout).trim().is_empty() {
-            return Err(ManifestError::GripspaceError(
-                "Cannot advance gripspace: working tree has local changes".to_string(),
-            ));
+        let dirty_out = String::from_utf8_lossy(&status.stdout);
+        let dirty = dirty_out.trim();
+
+        if at_rev {
+            // Nothing to advance. Honor the local content — NEVER drop repos —
+            // but a TRACKED edit to the pinned manifest earns a warning: gr is
+            // resolving from the local version, not the pinned revision. An
+            // untracked stray stays silent (that was the original defect).
+            if !dirty.is_empty() {
+                eprintln!(
+                    "warning: gripspace clone at {} is already at '{}' but has local (tracked) changes; \
+                     resolving from the local content, not the pinned revision:\n{}",
+                    path.display(),
+                    rev,
+                    dirty
+                );
+            }
+            return Ok(());
+        }
+
+        // Advancing to a moved origin/<rev> (reachable only after a fetch). A
+        // tracked change would be overwritten by `git checkout -B`, so refuse
+        // and name the clone path, the rev, and the files.
+        if !dirty.is_empty() {
+            return Err(ManifestError::GripspaceError(format!(
+                "Cannot advance gripspace clone at {} to '{}': working tree has local (tracked) changes:\n{}",
+                path.display(),
+                rev,
+                dirty
+            )));
         }
 
         let output = Command::new("git")
@@ -783,8 +823,12 @@ fn resolve_all_gripspaces_with_materialization(
     spaces_dir: &Path,
     materialize: bool,
 ) -> Result<(), ManifestError> {
-    let gripspaces = match manifest.gripspaces.take() {
-        Some(gs) if !gs.is_empty() => gs,
+    // Clone, do NOT take: an early `?`-return below must not erase the
+    // gripspaces declaration from the manifest. Taking it first meant a single
+    // failed include left an overlay-only manifest (no included repos, no
+    // declaration) that the caller then silently accepted.
+    let gripspaces = match &manifest.gripspaces {
+        Some(gs) if !gs.is_empty() => gs.clone(),
         _ => return Ok(()),
     };
 
