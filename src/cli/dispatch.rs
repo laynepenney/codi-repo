@@ -836,7 +836,9 @@ pub async fn dispatch_command(
                 config,
                 mock,
             } => {
-                crate::cli::commands::spawn::run_spawn_up(agent, config, mock, quiet, json)?;
+                crate::cli::commands::spawn::run_spawn_up(
+                    agent, config, mock, verbose, quiet, json,
+                )?;
             }
             SpawnCommands::Status => {
                 crate::cli::commands::spawn::run_spawn_status(quiet, json)?;
