@@ -1012,9 +1012,10 @@ fn codex_synapt_mcp_env_args(launch_env: &HashMap<String, String>) -> Vec<String
     args
 }
 
-/// Assemble the ordered launch argv: `binary + cmd + tool_args + model_inject
-/// + agent_args`. Tool-level args are composed BEFORE agent-level args so an
-/// agent can override a tool default (last occurrence wins downstream).
+/// Assemble the ordered launch argv, in order: `binary`, `cmd`, `tool_args`,
+/// `model_inject`, `agent_args`. Tool-level args are composed BEFORE
+/// agent-level args so an agent can override a tool default (last occurrence
+/// wins downstream).
 fn assemble_launch_parts(
     binary: &str,
     cmd_parts: &[String],
