@@ -5,6 +5,38 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.1] - 2026-09-10
+
+**Scope.** This release promotes `v1.5.0..<dev tip>` — **15 commits, 7 merge commits, and 7
+first-parent units**, measured with `git rev-list --count`, `git rev-list --merges --count`, and
+`git rev-list --first-parent --count` over `v1.5.0..origin/dev` (tag `v1.5.0` = 9894260d), with the
+empty range `v1.5.0..v1.5.0` returning 0 as the control. The release-prep commit carrying this
+entry sits one beyond that range and is excluded; this bump's own merge into `dev` and the
+`dev`→`main` promote merge add to a tag-range figure a reader measuring `v1.5.0..v1.5.1` would see.
+Rust source changed since 1.5.0 — three source files (`src/cli/commands/spawn.rs`,
+`src/cli/dispatch.rs`, `src/core/gripspace.rs`) and two test files
+(`tests/spawn_callsite_argorder.rs`, `tests/gripspace_include_rev_dirty.rs`) — so this is a
+substantive patch release, not a metadata-only bump.
+
+**gr2 review-run hardening (#1050, #1051).** A review lane can now run more than once: the run log
+is allow-listed so `review run` no longer refuses the second run as untracked drift, and a run
+refused before pytest writes a refusal receipt so `close-gr` can reclaim the lane. Import resolution
+is isolated on two axes — `-I` keeps the lane's cwd from shadowing its own package as a namespace
+directory, and a scrubbed environment (every `PYTHON*` variable dropped) is shared by the import
+checks and the pytest run, so a rogue package on `PYTHONPATH` can neither fool the check nor be
+imported by the run while the check certifies the lane.
+
+**gr spawn arg ordering (#1046, #1047, #1048).** `gr spawn up` now applies tool-level args to the
+launch command, with a call-site witness pinning that tool args compose before agent args; the
+witness is gated to `cfg(unix)` so it does not red the Windows build.
+
+**gripspace includes (#1045).** A rev-pinned gripspace-include clone that is dirty no longer drops
+its included repos: the resolver keeps them instead of silently taking the shorter list.
+
+**CI (#1049).** The clippy doc-comment lint on `assemble_launch_parts` is cleared and the Windows
+job is required in the CI aggregate, so the aggregate context that gates merges cannot go green
+without Windows.
+
 ## [1.5.0] - 2026-09-07
 
 **Scope.** This release promotes `v1.4.0..12b08f1e` — the immutable sha `12b08f1e` (the
