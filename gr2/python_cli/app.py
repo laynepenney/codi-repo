@@ -2292,6 +2292,15 @@ def review_run(
         )
     except rr.ReviewRunRefused as exc:
         typer.echo(f"refused: {exc}", err=True)
+        if json_output:
+            # review-run door 2: a refusal is machine-readable too, mirroring the
+            # refusal receipt run_review_lane wrote into the lane. Exit stays 2.
+            typer.echo(json.dumps({
+                "kind": "review-run",
+                "result": "refused",
+                "refusal_code": exc.code,
+                "refusal_detail": exc.detail,
+            }, indent=2))
         raise typer.Exit(code=2)
     if json_output:
         typer.echo(json.dumps(receipt, indent=2))

@@ -155,7 +155,7 @@ def assert_lane_tree_bound(repo_dir: Path, bound_head_tree: str) -> str:
 # Untracked paths the run itself is expected to create; everything else untracked in
 # the lane is drift, because an injected conftest.py or module can change what the
 # tests do WITHOUT touching the tracked tree (which `assert_lane_tree_bound` sees).
-_UNTRACKED_ALLOW_NAMES = frozenset({_MARKER_NAME, _RECEIPT_NAME})
+_UNTRACKED_ALLOW_NAMES = frozenset({_MARKER_NAME, _RECEIPT_NAME, _OUTPUT_LOG_NAME})
 _UNTRACKED_ALLOW_TOP = (_VENV_DIRNAME + "/",)
 _UNTRACKED_ALLOW_SEGMENTS = frozenset({"__pycache__", ".pytest_cache", ".mypy_cache"})
 
@@ -410,7 +410,59 @@ def _read_marker(lane_dir: Path) -> dict:
     return marker
 
 
+_NOT_A_LANE_CODES = frozenset({"no_marker", "not_open_gr"})
+
+
+def _write_refusal_receipt(lane_dir: Path, exc: "ReviewRunRefused") -> None:
+    """Persist WHY a run refused so the refusal is not invisible on disk (review-run
+    door 2): close-gr carries the receipt out of the lane, and `review run --json` has
+    something to print on a refusal instead of only a stderr line. Best-effort — a
+    failure to write the refusal record must never mask the refusal itself."""
+    receipt = {
+        "kind": "review-run",
+        "created": datetime.now(timezone.utc).isoformat(),
+        "result": "refused",
+        "refusal_code": exc.code,
+        "refusal_detail": exc.detail,
+        # A refusal after pytest ran (unparseable_summary, zero_collected) has already
+        # written the log; name it when present so close-gr carries it out too.
+        "output_log": _OUTPUT_LOG_NAME if (lane_dir / _OUTPUT_LOG_NAME).exists() else None,
+    }
+    try:
+        (lane_dir / _RECEIPT_NAME).write_text(json.dumps(receipt, indent=2) + "\n")
+    except OSError:
+        pass
+
+
 def run_review_lane(
+    lane_dir: Path,
+    *,
+    package: str | None = None,
+    pytest_args: list[str],
+    python: str | None = None,
+    install: list[str] | None = None,
+    system_site_packages: bool = False,
+) -> dict:
+    """Run the lane (see `_run_review_lane`) and, on a refusal that is about a real
+    lane, leave a receipt recording why (review-run door 2). `no_marker`/`not_open_gr`
+    mean the directory is not a lane at all, so no receipt is written there."""
+    lane_dir = Path(lane_dir).resolve()
+    try:
+        return _run_review_lane(
+            lane_dir,
+            package=package,
+            pytest_args=pytest_args,
+            python=python,
+            install=install,
+            system_site_packages=system_site_packages,
+        )
+    except ReviewRunRefused as exc:
+        if exc.code not in _NOT_A_LANE_CODES:
+            _write_refusal_receipt(lane_dir, exc)
+        raise
+
+
+def _run_review_lane(
     lane_dir: Path,
     *,
     package: str | None = None,
