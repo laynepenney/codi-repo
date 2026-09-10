@@ -194,6 +194,27 @@ def assert_no_untracked_drift(repo_dir: Path) -> None:
 
 # ---- import resolves under the lane -----------------------------------------
 
+def scrubbed_python_env(base: dict | None = None) -> dict:
+    """Return a copy of the environment with every ``PYTHON*`` variable removed.
+
+    ``-I`` isolates the CHECK subprocesses (it drops cwd and, via ``-E``, ignores
+    ``PYTHON*`` env), so the import resolves under the lane no matter what the caller
+    exported. But pytest itself runs WITHOUT ``-I`` — a plugin or conftest may
+    legitimately need the ambient interpreter — so a rogue package on ``PYTHONPATH``
+    outside the lane would be imported by the RUN while the check certified the lane:
+    a receipt naming the lane about someone else's tree (a full stale checkout would
+    even produce a GREEN one), the class review run exists to refuse. Passing this
+    scrubbed env to BOTH checks and pytest makes the check's environment the run's
+    environment, so ``PYTHONPATH``/``PYTHONHOME``/``PYTHONSAFEPATH``/
+    ``PYTHONNOUSERSITE``/``PYTHONSTARTUP`` and any other ``PYTHON*`` var can no longer
+    redirect the import the check just proved. ``-I`` still guards the CHECK against
+    the cwd shadow (the scrub does not touch cwd; ``-I`` does not touch the run)."""
+    env = dict(os.environ if base is None else base)
+    for key in [k for k in env if k.startswith("PYTHON")]:
+        del env[key]
+    return env
+
+
 def resolve_import_file(venv_python: Path, package: str, env: dict) -> str:
     """Import `package` in the venv python (under `env`) and return its __file__.
 
@@ -203,9 +224,10 @@ def resolve_import_file(venv_python: Path, package: str, env: dict) -> str:
     resolves that project directory as a PEP 420 namespace package with no
     `__file__` — `import_no_file` on a lane whose editable install is perfectly
     correct. `-I` drops cwd (and PYTHON* env / user site) from the path, so the
-    import resolves to the installed package under the lane, which is exactly what
-    `assert_import_under_lane` then verifies (and it hardens that check against a
-    PYTHONPATH shadow rather than weakening it)."""
+    CHECK's import resolves to the installed package under the lane, which is exactly
+    what `assert_import_under_lane` then verifies. `-I` isolates the CHECK only; the
+    RUN is isolated by `scrubbed_python_env` (a `PYTHONPATH` shadow is neutralized for
+    pytest there, not here)."""
     proc = subprocess.run(
         [str(venv_python), "-I", "-c", f"import {package} as _m; print(_m.__file__ or '')"],
         text=True,
@@ -587,8 +609,14 @@ def _run_review_lane(
             f"repo's .review-install. install: `{' '.join(install_cmd)}`",
         )
 
-    # (5) IMPORT UNDER THE LANE — in the same env pytest will use.
-    run_env = {**os.environ}
+    # (5) IMPORT UNDER THE LANE — in the same env pytest will use. run_env scrubs every
+    #     PYTHON* variable, so a rogue package on PYTHONPATH can neither shadow the CHECK
+    #     (already isolated by -I) nor be imported by the RUN, which runs without -I. The
+    #     SAME env object flows to the import check, the pytest-import check, and pytest
+    #     below, so "resolves under the lane" is a fact about the run and not just the
+    #     check (the review-run env-isolation fix: -I isolates the check, not the run;
+    #     the check and the run must see one environment).
+    run_env = scrubbed_python_env()
     resolved_file = resolve_import_file(venv_python, package, run_env)
     assert_import_under_lane(resolved_file, lane_dir)
 

@@ -116,3 +116,39 @@ def test_import_check_argv_carries_isolated_flag():
 
     src = inspect.getsource(rr.resolve_import_file)
     assert '"-I"' in src, "resolve_import_file must run the import subprocess with -I"
+
+
+def test_scrubbed_python_env_drops_every_python_star_var(monkeypatch):
+    """-I isolates the CHECK; the pytest RUN runs without -I, so the run's env is
+    isolated by scrubbing PYTHON*. This pins the scrub: every PYTHON* variable is
+    removed and non-PYTHON variables are preserved. The behavioral witness that a
+    PYTHONPATH rogue does not change the RUN lives in test_review_run.py; this is the
+    unit-level guard on the seam that flows to both checks and pytest."""
+    for name in (
+        "PYTHONPATH", "PYTHONHOME", "PYTHONSAFEPATH",
+        "PYTHONNOUSERSITE", "PYTHONSTARTUP", "PYTHONDONTWRITEBYTECODE",
+    ):
+        monkeypatch.setenv(name, "rogue-value")
+    monkeypatch.setenv("KEEP_ME_UNSCRUBBED", "yes")
+
+    env = rr.scrubbed_python_env()
+
+    assert not any(k.startswith("PYTHON") for k in env), (
+        "scrubbed_python_env left a PYTHON* var: "
+        f"{sorted(k for k in env if k.startswith('PYTHON'))}"
+    )
+    assert env.get("KEEP_ME_UNSCRUBBED") == "yes", "a non-PYTHON var must survive the scrub"
+
+
+def test_run_env_is_built_by_the_scrub_and_flows_to_pytest():
+    """A structural pin so a refactor cannot rebuild run_env from a raw os.environ and
+    silently reintroduce the PYTHONPATH-shadows-the-run defect: the run's env is the
+    scrub's output, and pytest is invoked under that same run_env."""
+    import inspect
+
+    src = inspect.getsource(rr._run_review_lane)
+    assert "run_env = scrubbed_python_env()" in src, (
+        "the review run must build run_env via scrubbed_python_env(), not {**os.environ}"
+    )
+    # the pytest subprocess must run under run_env (not a fresh/raw env)
+    assert "env=run_env" in src, "pytest must run under the scrubbed run_env"

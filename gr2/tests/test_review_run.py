@@ -423,6 +423,34 @@ def test_run_refuses_when_the_import_escapes_the_lane(tmp_path: Path):
         rr.run_review_lane(repo, package="demo_pkg", pytest_args=["-q"], install=install)
 
 
+def test_run_a_pythonpath_rogue_does_not_change_the_run(tmp_path: Path, monkeypatch):
+    # The RUN's counterpart to the venv-site escape test above. -I isolates the CHECK,
+    # not the pytest RUN (which runs without -I): before the env scrub, a rogue package
+    # on PYTHONPATH outside the lane was ignored by resolve_import_file (-I) yet imported
+    # by pytest, so the check certified the lane while the run ran someone else's tree —
+    # a receipt naming the lane about the wrong code. run_env now scrubs every PYTHON*
+    # var and flows to BOTH checks and pytest, so a PYTHONPATH rogue does not change the
+    # run's result: the lane's own demo_pkg (VALUE==1) wins and the run is green.
+    #
+    # This is the mutation witness for the scrub: the rogue's VALUE==2 makes PASS_TEST
+    # (assert VALUE==1) fail, so dropping the scrub from run_env reds THIS test at the
+    # assertion — the run would import the rogue. With the scrub it is green.
+    repo, head_tree = _pkg_repo(tmp_path, test_body=PASS_TEST)
+    _write_marker(repo, _git(repo, "rev-parse", "HEAD"), head_tree)
+    rogue = tmp_path / "rogue_pythonpath"
+    (rogue / "demo_pkg").mkdir(parents=True)
+    (rogue / "demo_pkg" / "__init__.py").write_text("VALUE = 2\n")  # a DIFFERENT tree
+    monkeypatch.setenv("PYTHONPATH", str(rogue))
+    receipt = rr.run_review_lane(
+        repo, package="demo_pkg", pytest_args=["-q"], install=_offline_install(repo),
+    )
+    # green: pytest imported the LANE's demo_pkg (VALUE==1), not the rogue (VALUE==2).
+    assert receipt["result"] == "green", receipt
+    assert receipt["passed"] >= 1 and receipt["failed"] == 0
+    # and the receipt's install path is the lane, matching what the run actually ran.
+    assert str(repo.resolve()) in receipt["resolved_install_path"]
+
+
 # ------------------------------------------ install hint + pytest-absent cause
 
 _SEED_SCRIPT = (
