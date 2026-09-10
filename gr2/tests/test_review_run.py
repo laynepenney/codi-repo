@@ -397,32 +397,30 @@ def test_run_all_skipped_is_not_green(tmp_path: Path):
 
 
 def test_run_refuses_when_the_import_escapes_the_lane(tmp_path: Path):
-    # Stromus addition 4b: a second checkout shadowing the package via PYTHONPATH is
-    # a refusal. Install NOTHING under the lane; put a rogue demo_pkg on PYTHONPATH.
+    # Stromus addition 4b: a second checkout shadowing the package is a refusal.
+    # the import isolation change moved the escape VECTOR that matters: the check runs
+    # with -I, so a PYTHONPATH shadow is IGNORED entirely (it can no longer escape,
+    # see the -I test) -- but a rogue reachable from the venv's OWN site (a stale
+    # editable install pointing at another checkout) survives -I and must still
+    # refuse. Install NOTHING under the lane; put the rogue demo_pkg on the venv site
+    # path, so `import demo_pkg` resolves OUTSIDE the lane.
     repo, head_tree = _pkg_repo(tmp_path, test_body=PASS_TEST)
     _write_marker(repo, _git(repo, "rev-parse", "HEAD"), head_tree)
     rogue = tmp_path / "rogue_checkout"
     (rogue / "demo_pkg").mkdir(parents=True)
     (rogue / "demo_pkg" / "__init__.py").write_text("VALUE = 2\n")
-    # install command that only makes host pytest importable (NOT demo_pkg under lane)
+    # install command that makes host pytest importable AND puts the rogue checkout
+    # on the venv site path (NOT demo_pkg under the lane) -- a stale-editable-install
+    # shadow, the vector -I does not neutralize.
     vpy = repo / rr._VENV_DIRNAME / "bin" / "python"
     script = (
         "import site,sys,pathlib;"
         "sp=pathlib.Path(site.getsitepackages()[0]);sp.mkdir(parents=True,exist_ok=True);"
         "(sp/'zz_host.pth').write_text('\\n'.join(sys.argv[1:])+'\\n')"
     )
-    install = [str(vpy), "-c", script, *[p for p in sys.path if p]]
-    import os
-    old = os.environ.get("PYTHONPATH")
-    os.environ["PYTHONPATH"] = str(rogue) + (os.pathsep + old if old else "")
-    try:
-        with pytest.raises(rr.ReviewRunRefused, match="import_escapes_lane"):
-            rr.run_review_lane(repo, package="demo_pkg", pytest_args=["-q"], install=install)
-    finally:
-        if old is None:
-            os.environ.pop("PYTHONPATH", None)
-        else:
-            os.environ["PYTHONPATH"] = old
+    install = [str(vpy), "-c", script, str(rogue), *[p for p in sys.path if p]]
+    with pytest.raises(rr.ReviewRunRefused, match="import_escapes_lane"):
+        rr.run_review_lane(repo, package="demo_pkg", pytest_args=["-q"], install=install)
 
 
 # ------------------------------------------ install hint + pytest-absent cause

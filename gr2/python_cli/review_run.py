@@ -195,9 +195,19 @@ def assert_no_untracked_drift(repo_dir: Path) -> None:
 # ---- import resolves under the lane -----------------------------------------
 
 def resolve_import_file(venv_python: Path, package: str, env: dict) -> str:
-    """Import `package` in the venv python (under `env`) and return its __file__."""
+    """Import `package` in the venv python (under `env`) and return its __file__.
+
+    Run with `-I` (isolated): `python -c` otherwise prepends the process cwd to
+    `sys.path[0]`, and this subprocess inherits the lane as cwd, so a repo whose
+    ROOT holds a directory named like its importable package (grip's `gr2/`)
+    resolves that project directory as a PEP 420 namespace package with no
+    `__file__` — `import_no_file` on a lane whose editable install is perfectly
+    correct. `-I` drops cwd (and PYTHON* env / user site) from the path, so the
+    import resolves to the installed package under the lane, which is exactly what
+    `assert_import_under_lane` then verifies (and it hardens that check against a
+    PYTHONPATH shadow rather than weakening it)."""
     proc = subprocess.run(
-        [str(venv_python), "-c", f"import {package} as _m; print(_m.__file__ or '')"],
+        [str(venv_python), "-I", "-c", f"import {package} as _m; print(_m.__file__ or '')"],
         text=True,
         capture_output=True,
         env=env,
@@ -586,8 +596,11 @@ def _run_review_lane(
     #     not bring it (pytest is a test-time extra), and running pytest anyway
     #     yields exit 1 with no summary — which the summary check would mislabel
     #     `unparseable_summary`. Name the real cause instead, and keep it a refusal.
+    # `-I` for the same reason as resolve_import_file: a lane whose root holds a
+    # `pytest/` directory would otherwise import that namespace dir from cwd and
+    # pass this check while real pytest is absent. Resolve against the install only.
     proc = subprocess.run(
-        [str(venv_python), "-c", "import pytest"], text=True, capture_output=True, env=run_env
+        [str(venv_python), "-I", "-c", "import pytest"], text=True, capture_output=True, env=run_env
     )
     if proc.returncode != 0:
         raise ReviewRunRefused(
